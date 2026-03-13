@@ -1,0 +1,30 @@
+{
+    "name": "@openanonymity/memory",
+    "version": "0.1.0",
+    "description": "LLM-driven personal memory with agentic retrieval, extraction, and compaction",
+    "type": "module",
+    "engines": {
+        "node": ">=18"
+    },
+    "exports": {
+        ".": "./src/index.js",
+        "./bullets": "./src/bullets/utils.js",
+        "./storage": "./src/storage/interface.js",
+        "./llm": "./src/llm/openai.js",
+        "./llm/openai": "./src/llm/openai.js",
+        "./llm/anthropic": "./src/llm/anthropic.js"
+    },
+    "main": "./src/index.js",
+    "files": [
+        "src/"
+    ],
+    "keywords": [
+        "memory",
+        "llm",
+        "ai",
+        "personal-memory",
+        "retrieval",
+        "extraction"
+    ],
+    "license": "MIT"
+}
