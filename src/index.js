@@ -175,6 +175,11 @@ export { MemoryRetrieval } from './core/retrieval.js';
 export { MemoryExtractor } from './core/extractor.js';
 export { MemoryCompactor } from './core/compactor.js';
 export {
+    extractSessionsFromOAFastchatExport,
+    extractConversationFromOAFastchatExport,
+    listOAFastchatSessions
+} from './imports/index.js';
+export {
     createRetrievalExecutors,
     createExtractionExecutors
 } from './storage/interface.js';

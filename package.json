@@ -9,6 +9,7 @@
     "exports": {
         ".": "./src/index.js",
         "./bullets": "./src/bullets/utils.js",
+        "./imports": "./src/imports/index.js",
         "./storage": "./src/storage/interface.js",
         "./llm": "./src/llm/openai.js",
         "./llm/openai": "./src/llm/openai.js",

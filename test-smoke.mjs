@@ -14,6 +14,8 @@
  */
 
 import { createMemory } from './src/index.js';
+import { readFile } from 'node:fs/promises';
+import { extractSessionsFromOAFastchatExport } from './src/imports/index.js';
 
 // ─── Config from env / CLI flag ──────────────────────────────
 // Usage:
@@ -28,7 +30,13 @@ const PRESETS = {
     anthropic: { envKey: 'ANTHROPIC_API_KEY',  baseUrl: 'https://api.anthropic.com',       model: 'claude-sonnet-4-6', provider: 'anthropic' },
 };
 
-// CLI flags: --provider <name>, --storage <memory|filesystem>, --path <dir>
+// CLI flags:
+//   --provider <name>
+//   --storage <memory|filesystem>
+//   --path <dir>
+//   --conversation-json <path>
+//   --session-id <id>
+//   --session-title <title>
 function getFlag(name) {
     const idx = process.argv.indexOf(`--${name}`);
     return idx !== -1 ? process.argv[idx + 1] : null;
@@ -37,6 +45,9 @@ function getFlag(name) {
 const flagValue = getFlag('provider');
 const storageFlag = getFlag('storage') || 'memory';
 const storagePath = getFlag('path') || '/tmp/memory-smoke-test';
+const conversationJsonPath = getFlag('conversation-json');
+const sessionId = getFlag('session-id');
+const sessionTitle = getFlag('session-title');
 
 let selected;
 if (flagValue) {
@@ -80,17 +91,32 @@ await memory.init();
 // ─── Step 1: Extract facts from a conversation ──────────────
 
 console.log('\n--- EXTRACT ---');
-const conversation = [
+const fallbackConversation = [
     { role: 'user', content: "I'm allergic to peanuts and shellfish. I live in San Francisco and work as a software engineer at a startup called Acme." },
     { role: 'assistant', content: "Thanks for sharing! I'll keep in mind your peanut and shellfish allergies. SF is a great city for software engineers — how's the work at Acme going?" },
     { role: 'user', content: "It's great! I'm leading the backend team. We use TypeScript and PostgreSQL. I also have a cat named Mochi. I'm currently preparing for a product launch next month." },
     { role: 'assistant', content: "That sounds like a solid tech stack! And Mochi is an adorable name for a cat. What kind of cat is Mochi?" },
 ];
 
-const extractResult = await memory.extract(conversation, {
-    onToolCall: (name, args) => console.log(`  tool: ${name}`, JSON.stringify(args).slice(0, 120)),
-});
-console.log(`Extract result: status=${extractResult.status}, writeCalls=${extractResult.writeCalls}`);
+let conversations = [{ session: { title: 'fallback' }, conversation: fallbackConversation }];
+if (conversationJsonPath) {
+    const raw = await readFile(conversationJsonPath, 'utf8');
+    const exportJson = JSON.parse(raw);
+    conversations = extractSessionsFromOAFastchatExport(exportJson, { sessionId, sessionTitle });
+    const totalMessages = conversations.reduce((sum, entry) => sum + entry.conversation.length, 0);
+    console.log(`Loaded ${totalMessages} messages from ${conversations.length} session(s)`);
+}
+
+let totalWriteCalls = 0;
+for (const entry of conversations) {
+    console.log(`\nSession: "${entry.session.title || entry.session.id || 'untitled'}" (${entry.conversation.length} messages)`);
+    const extractResult = await memory.extract(entry.conversation, {
+        onToolCall: (name, args) => console.log(`  tool: ${name}`, JSON.stringify(args).slice(0, 120)),
+    });
+    totalWriteCalls += extractResult.writeCalls;
+    console.log(`  Extract result: status=${extractResult.status}, writeCalls=${extractResult.writeCalls}`);
+}
+console.log(`Total writeCalls=${totalWriteCalls}`);
 
 // ─── Step 2: Inspect what was saved ─────────────────────────
 
