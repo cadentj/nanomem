@@ -84,6 +84,10 @@ const memory = createMemory({
     llm: { apiKey, baseUrl, model, provider },
     storage: storageFlag,
     storagePath,
+    onToolCall: (name, args) => console.log(`  tool: ${name}`, JSON.stringify(args).slice(0, 120)),
+    onProgress: (p) => {
+        if (p.stage === 'tool_call') console.log(`  tool: ${p.tool}`, JSON.stringify(p.args || {}).slice(0, 100));
+    },
 });
 
 await memory.init();
@@ -110,18 +114,16 @@ if (conversationJsonPath) {
 let totalWriteCalls = 0;
 for (const entry of conversations) {
     console.log(`\nSession: "${entry.session.title || entry.session.id || 'untitled'}" (${entry.conversation.length} messages)`);
-    const extractResult = await memory.extract(entry.conversation, {
-        onToolCall: (name, args) => console.log(`  tool: ${name}`, JSON.stringify(args).slice(0, 120)),
-    });
+    const extractResult = await memory.extract(entry.conversation);
     totalWriteCalls += extractResult.writeCalls;
-    console.log(`  Extract result: status=${extractResult.status}, writeCalls=${extractResult.writeCalls}`);
+    console.log(`  Extract result: status=${extractResult.status}, writeCalls=${extractResult.writeCalls}${extractResult.error ? `, error=${extractResult.error}` : ''}`);
 }
 console.log(`Total writeCalls=${totalWriteCalls}`);
 
 // ─── Step 2: Inspect what was saved ─────────────────────────
 
 console.log('\n--- STORED FILES ---');
-const allFiles = await memory.exportAll();
+const allFiles = await memory._exportAll();
 for (const f of allFiles) {
     if (f.path === '_index.md') continue;
     const preview = (f.content || '').split('\n').filter(l => l.trim().startsWith('-')).slice(0, 3).join('\n  ');
@@ -139,11 +141,7 @@ const queries = [
 
 for (const query of queries) {
     console.log(`\nQuery: "${query}"`);
-    const result = await memory.retrieve(query, {
-        onProgress: (p) => {
-            if (p.stage === 'tool_call') console.log(`  tool: ${p.tool}`, JSON.stringify(p.args || {}).slice(0, 100));
-        },
-    });
+    const result = await memory.retrieve(query);
     if (result?.assembledContext) {
         const lines = result.assembledContext.split('\n').filter(l => l.trim()).slice(0, 5);
         console.log(`  Context (${result.paths.length} files):`);
@@ -161,7 +159,7 @@ console.log('Compaction complete');
 
 // Show final state
 console.log('\n--- FINAL STATE ---');
-const finalFiles = await memory.exportAll();
+const finalFiles = await memory._exportAll();
 for (const f of finalFiles) {
     if (f.path === '_index.md') continue;
     if (!f.content?.trim()) continue;

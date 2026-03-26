@@ -1,9 +1,10 @@
 /**
  * @openanonymity/memory — LLM-driven personal memory.
  *
- * createMemory(config) is the main entry point. It wires up an LLM client,
- * storage backend, bullet index, and the three core modules (retrieval,
- * extraction, compaction) into a single public API.
+ * createMemory(config) is the main entry point.
+ *
+ * Public API: init, retrieve, extract, compact.
+ * Low-level storage access is available via _-prefixed methods.
  */
 
 import { createOpenAIClient } from './llm/openai.js';
@@ -12,7 +13,7 @@ import { MemoryBulletIndex } from './bullets/bulletIndex.js';
 import { MemoryRetrieval } from './core/retrieval.js';
 import { MemoryExtractor } from './core/extractor.js';
 import { MemoryCompactor } from './core/compactor.js';
-import { InMemoryStorage } from './storage/memory.js';
+import { InMemoryStorage } from './storage/ram.js';
 
 /**
  * Create a memory instance.
@@ -21,24 +22,43 @@ import { InMemoryStorage } from './storage/memory.js';
  * @param {object} [config.llm] — { apiKey, baseUrl, model, provider?, headers? }
  * @param {object} [config.llmClient] — custom LLM client (overrides config.llm)
  * @param {string} [config.model] — model ID (can also be set in config.llm.model)
- * @param {string|object} [config.storage='memory'] — 'indexeddb' | 'filesystem' | 'memory' | custom backend
+ * @param {string|object} [config.storage='ram'] — 'ram' | 'filesystem' | 'indexeddb' | custom backend
  * @param {string} [config.storagePath] — root directory for filesystem backend
+ * @param {Function} [config.onProgress] — retrieval progress callback({ stage, message, ... })
+ * @param {Function} [config.onToolCall] — extraction tool call callback(name, args, result)
+ * @param {Function} [config.onModelText] — intermediate model text callback(text)
  */
 export function createMemory(config = {}) {
-    // ─── LLM Client ─────────────────────────────────────────────
     const llmClient = config.llmClient || _createLlmClient(config.llm || {});
     const model = config.model || config.llm?.model || 'gpt-4o';
-
-    // ─── Storage Backend ─────────────────────────────────────────
     const backend = _createBackend(config.storage, config.storagePath);
-
-    // ─── Bullet Index ────────────────────────────────────────────
     const bulletIndex = new MemoryBulletIndex(backend);
 
-    // ─── Core Modules ────────────────────────────────────────────
-    const retrieval = new MemoryRetrieval({ backend, bulletIndex, llmClient, model });
-    const extractor = new MemoryExtractor({ backend, bulletIndex, llmClient, model });
+    const retrieval = new MemoryRetrieval({
+        backend, bulletIndex, llmClient, model,
+        onProgress: config.onProgress,
+        onModelText: config.onModelText,
+    });
+    const extractor = new MemoryExtractor({
+        backend, bulletIndex, llmClient, model,
+        onToolCall: config.onToolCall,
+    });
     const compactor = new MemoryCompactor({ backend, bulletIndex, llmClient, model });
+
+    async function write(path, content) {
+        await backend.write(path, content);
+        await bulletIndex.refreshPath(path);
+    }
+
+    async function remove(path) {
+        await backend.delete(path);
+        await bulletIndex.refreshPath(path);
+    }
+
+    async function rebuildIndex() {
+        await backend.rebuildIndex();
+        await bulletIndex.rebuild();
+    }
 
     // ─── Public API ──────────────────────────────────────────────
     return {
@@ -48,45 +68,35 @@ export function createMemory(config = {}) {
         /**
          * Retrieve relevant memory context for a query.
          * @param {string} query
-         * @param {object} [options] — { conversationText, onProgress, onModelText, signal }
+         * @param {string} [conversationText] — current session text for reference resolution
          * @returns {Promise<{files, paths, assembledContext}|null>}
          */
-        retrieve: (query, options) => retrieval.retrieveForQuery(query, options),
+        retrieve: (query, conversationText) => retrieval.retrieveForQuery(query, conversationText),
 
         /**
          * Extract facts from a conversation into memory.
          * @param {Array<{role: string, content: string}>} messages
-         * @param {object} [options] — { signal, onToolCall }
          * @returns {Promise<{status: string, writeCalls: number}>}
          */
-        extract: (messages, options) => extractor.extract(messages, options),
+        extract: (messages) => extractor.extract(messages),
 
-        /**
-         * Compact all memory files (dedup, archive stale facts).
-         * Forces immediate compaction.
-         */
+        /** Compact all memory files (dedup, archive stale facts). */
         compact: () => compactor.compactAll(),
 
-        /**
-         * Compact only if ≥6 hours since last run (opportunistic).
-         * Call at convenient trigger points (after extraction, on load).
-         */
-        maybeCompact: () => compactor.maybeCompact(),
+        // ─── Low-level storage (not for typical use) ─────────────
+        _read: (path) => backend.read(path),
+        _write: write,
+        _delete: remove,
+        _exists: (path) => backend.exists(path),
+        _search: (query) => backend.search(query),
+        _ls: (dirPath) => backend.ls(dirPath),
+        _getIndex: () => backend.getIndex(),
+        _rebuildIndex: rebuildIndex,
+        _exportAll: () => backend.exportAll(),
 
-        // ─── Direct Storage Access ──────────────────────────────
-        read: (path) => backend.read(path),
-        write: (path, content) => backend.write(path, content),
-        delete: (path) => backend.delete(path),
-        exists: (path) => backend.exists(path),
-        search: (query) => backend.search(query),
-        ls: (dirPath) => backend.ls(dirPath),
-        getIndex: () => backend.getIndex(),
-        rebuildIndex: () => backend.rebuildIndex(),
-        exportAll: () => backend.exportAll(),
-
-        // ─── Internals (for advanced use) ───────────────────────
-        backend,
-        bulletIndex,
+        // ─── Internals (for advanced use / testing) ──────────────
+        _backend: backend,
+        _bulletIndex: bulletIndex,
     };
 }
 
@@ -98,14 +108,12 @@ function _createLlmClient(llmConfig) {
         throw new Error('createMemory: config.llm.apiKey is required (or provide config.llmClient)');
     }
 
-    // Auto-detect provider from baseUrl if not specified
     const detectedProvider = provider || _detectProvider(baseUrl);
 
     if (detectedProvider === 'anthropic') {
         return createAnthropicClient({ apiKey, baseUrl, headers });
     }
 
-    // Default: OpenAI-compatible (works with OpenAI, Tinfoil, OpenRouter, etc.)
     return createOpenAIClient({ apiKey, baseUrl, headers });
 }
 
@@ -122,30 +130,22 @@ function _createBackend(storage, storagePath) {
         return storage;
     }
 
-    const storageType = typeof storage === 'string' ? storage : 'memory';
+    const storageType = typeof storage === 'string' ? storage : 'ram';
 
     switch (storageType) {
         case 'indexeddb':
-            // Dynamic import: indexeddb.js uses browser-only APIs that would fail in Node.
-            // The MemoryFileSystem class is loaded on demand and cached.
             return _asyncBackend(() => import('./storage/indexeddb.js').then(m => new m.MemoryFileSystem()));
         case 'filesystem':
-            // Dynamic import: filesystem.js uses node:fs which would fail in browsers.
             return _asyncBackend(() => import('./storage/filesystem.js').then(m => new m.FileSystemStorage(storagePath)));
-        case 'memory':
+        case 'ram':
         default:
             return new InMemoryStorage();
     }
 }
 
 /**
- * Wraps an async backend loader into a synchronous proxy object.
- *
- * createMemory() must return synchronously, but the 'indexeddb' and 'filesystem'
- * backends require dynamic import() because they use environment-specific APIs
- * (browser IndexedDB or node:fs). This wrapper defers the import to the first
- * method call — typically init() — and delegates all subsequent calls to the
- * loaded backend.
+ * Wraps an async backend loader into a synchronous proxy.
+ * Defers dynamic import() to the first method call.
  */
 function _asyncBackend(loader) {
     let _backend = null;
@@ -169,17 +169,15 @@ function _asyncBackend(loader) {
 
 export { createOpenAIClient } from './llm/openai.js';
 export { createAnthropicClient } from './llm/anthropic.js';
-export { InMemoryStorage } from './storage/memory.js';
+export { InMemoryStorage } from './storage/ram.js';
+export { BaseStorage } from './storage/BaseStorage.js';
 export { MemoryBulletIndex } from './bullets/bulletIndex.js';
 export { MemoryRetrieval } from './core/retrieval.js';
 export { MemoryExtractor } from './core/extractor.js';
 export { MemoryCompactor } from './core/compactor.js';
+export { createRetrievalExecutors, createExtractionExecutors } from './core/executors.js';
 export {
     extractSessionsFromOAFastchatExport,
     extractConversationFromOAFastchatExport,
     listOAFastchatSessions
 } from './imports/index.js';
-export {
-    createRetrievalExecutors,
-    createExtractionExecutors
-} from './storage/interface.js';

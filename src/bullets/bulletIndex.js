@@ -1,4 +1,4 @@
-import { parseMemoryBullets, todayIsoDate } from './utils.js';
+import { parseMemoryBullets, todayIsoDate } from './index.js';
 
 class MemoryBulletIndex {
     constructor(backend) {
@@ -13,6 +13,12 @@ class MemoryBulletIndex {
         if (this._initialized) return;
         if (this._initPromise) return this._initPromise;
 
+        this._initPromise = this._rebuild();
+        await this._initPromise;
+    }
+
+    async rebuild() {
+        this._initialized = false;
         this._initPromise = this._rebuild();
         await this._initPromise;
     }
@@ -44,6 +50,7 @@ class MemoryBulletIndex {
             .map((line) => line.trim())
             .filter(Boolean)
             .filter((line) => !line.startsWith('#'))
+            .filter((line) => !/^_no entries yet\._$/i.test(line))
             .slice(0, 200);
 
         const today = todayIsoDate();

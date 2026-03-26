@@ -2,11 +2,10 @@
  * MemoryExtractor — Write path for agentic memory.
  *
  * Takes a conversation (array of messages) and uses tool-calling via the
- * agentic loop to examine the conversation and decide whether to
- * create/append/update memory files.
+ * agentic loop to decide whether to create/append/update memory files.
  */
 import { runAgenticToolLoop } from './toolLoop.js';
-import { createExtractionExecutors } from '../storage/interface.js';
+import { createExtractionExecutors } from './executors.js';
 import {
     compactBullets,
     ensureBulletMetadata,
@@ -14,7 +13,7 @@ import {
     parseMemoryBullets,
     renderCompactedMemoryDocument,
     todayIsoDate
-} from '../bullets/utils.js';
+} from '../bullets/index.js';
 
 const MAX_CONVERSATION_CHARS = 128000;
 
@@ -138,89 +137,90 @@ Current memory index:
 {INDEX}
 \`\`\`
 
-Directory structure — create topic-specific files, one per distinct subject:
-- personal/about.md — Core identity: name, age, location, background
-- personal/family.md — Family members, relationships, family health
-- health/<condition>.md — One file per health condition or medical topic (e.g. health/thyroid.md, health/anxiety.md)
-- work/<topic>.md — Career, job, professional skills (e.g. work/role.md, work/negotiation.md)
-- interests/<topic>.md — Hobbies, media preferences, activities (e.g. interests/running.md, interests/cooking.md)
-- pets/<name>.md — Pet information
-- projects/<project-name>.md — One file per project/app/task
-- preferences/<topic>.md — Dietary, lifestyle, or other preferences
-- Available namespaces: personal/, health/, work/, interests/, pets/, projects/, preferences/, temporary/
-
-**Key principle: Create a NEW file for each distinct topic rather than cramming unrelated facts into one file.** For example, thyroid health goes in health/thyroid.md, not personal/about.md. A pet cat goes in pets/ not personal/about.md.
+**Key principle: Create a NEW file for each distinct topic rather than cramming unrelated facts into one file.** Organize files into folders by domain (e.g. health/, work/, personal/) and create topic-specific files within them (e.g. health/allergies.md, work/role.md). The folder structure should emerge naturally from the topics discussed.
 
 Instructions:
 1. Read the conversation below and decide if anything new should be saved.
 2. If a matching file already exists in the index, use read_file first to avoid duplicates.
 3. If no relevant file exists yet, create_new_file directly.
 4. Use append_memory to add to existing files when the topic matches, or create_new_file for new topics.
-5. Prefer this simple bullet format: "- Fact text | topic=topic-name | updated_at=YYYY-MM-DD"
-6. You may optionally add tier=working for clearly short-term or in-progress context. If you are unsure, omit tier and just save the fact.
-7. Facts usually worth saving when first learned include allergies, health conditions, where the user lives, job/role, ongoing tech stack, pets, family members, durable preferences, and active plans.
-8. If a fact is time-sensitive, include date context in the text. You may optionally add review_at or expires_at.
-9. If nothing new is worth remembering, simply stop without calling any write tools.
+5. Prefer this bullet format: "- Fact text | topic=topic-name | source=user_statement | confidence=high | updated_at=YYYY-MM-DD"
+6. Add source=user_statement for direct user claims, assistant_summary for faithful summaries of user claims, inference only for carefully justified inferred facts, and system for system-authored memory.
+7. Confidence should usually be high for direct user statements, medium for assistant summaries or system notes, and low for inferences.
+8. You may optionally add tier=working for clearly short-term or in-progress context. If you are unsure, omit tier and just save the fact.
+9. Facts usually worth saving when first learned include allergies, health conditions, where the user lives, job/role, ongoing tech stack, pets, family members, durable preferences, and active plans.
+10. If a fact is time-sensitive, include date context in the text. You may optionally add review_at or expires_at.
+11. If nothing new is worth remembering, simply stop without calling any write tools.
 
 Rules:
 - One file per distinct topic. Do NOT put unrelated facts in the same file.
 - Create new files freely — it is better to have many focused files than one bloated file.
 - Use update_memory only if a fact is now stale or contradicted.
+- When a new explicit user statement contradicts an older explicit statement on the same topic, prefer the newer statement. If a user statement conflicts with an inference, the user statement wins.
+- If a conflict is ambiguous, preserve both versions rather than deleting one.
 - Do not skip obvious facts just because the schema supports extra metadata.
 - Content should be raw facts only — no filler commentary.`;
 
 
 class MemoryExtractor {
-    constructor({ backend, bulletIndex, llmClient, model }) {
+    /**
+     * @param {object} deps
+     * @param {Function} [deps.onToolCall] — callback(name, args, result)
+     */
+    constructor({ backend, bulletIndex, llmClient, model, onToolCall }) {
         this._backend = backend;
         this._bulletIndex = bulletIndex;
         this._llmClient = llmClient;
         this._model = model;
+        this._onToolCall = onToolCall || null;
     }
 
     /**
      * Extract memory from a conversation.
-     * @param {Array<{role: string, content: string}>} messages — conversation messages
-     * @param {object} [options]
-     * @param {AbortSignal} [options.signal] — cancellation signal
-     * @param {Function} [options.onToolCall] — callback(name, args, result) for progress
-     * @returns {Promise<{ status: 'processed'|'skipped', writeCalls: number }>}
+     *
+     * @param {Array<{role: string, content: string}>} messages
+     * @returns {Promise<{status: 'processed'|'skipped'|'error', writeCalls: number, error?: string}>}
      */
-    async extract(messages, { signal, onToolCall } = {}) {
+    async extract(messages) {
+        const onToolCall = this._onToolCall;
         if (!messages || messages.length < 2) return { status: 'skipped', writeCalls: 0 };
 
         const conversationText = this._buildConversationText(messages);
         if (!conversationText) return { status: 'skipped', writeCalls: 0 };
 
-        if (signal?.aborted) return { status: 'skipped', writeCalls: 0 };
-
         await this._backend.init();
         const index = await this._backend.getIndex() || '';
 
-        const systemPrompt = EXTRACTION_SYSTEM_PROMPT.replace('{INDEX}', index);
+        const systemPrompt = EXTRACTION_SYSTEM_PROMPT
+            .replace('{INDEX}', index);
         const toolExecutors = createExtractionExecutors(this._backend, {
             normalizeContent: (content, path) => this._normalizeGeneratedContent(content, path),
             mergeWithExisting: (existing, incoming, path) => this._mergeWithExisting(existing, incoming, path),
             refreshIndex: (path) => this._bulletIndex.refreshPath(path)
         });
 
-        const { toolCallLog } = await runAgenticToolLoop({
-            llmClient: this._llmClient,
-            model: this._model,
-            tools: EXTRACTION_TOOLS,
-            toolExecutors,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: `Conversation:\n\`\`\`\n${conversationText}\n\`\`\`` }
-            ],
-            maxIterations: 6,
-            maxOutputTokens: 500,
-            temperature: 0,
-            signal,
-            onToolCall: (name, args, result) => {
-                onToolCall?.(name, args, result);
-            }
-        });
+        let toolCallLog;
+        try {
+            const result = await runAgenticToolLoop({
+                llmClient: this._llmClient,
+                model: this._model,
+                tools: EXTRACTION_TOOLS,
+                toolExecutors,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: `Conversation:\n\`\`\`\n${conversationText}\n\`\`\`` }
+                ],
+                maxIterations: 6,
+                maxOutputTokens: 500,
+                temperature: 0,
+                onToolCall: (name, args, result) => {
+                    onToolCall?.(name, args, result);
+                }
+            });
+            toolCallLog = result.toolCallLog;
+        } catch (error) {
+            return { status: 'error', writeCalls: 0, error: error.message };
+        }
 
         const writeTools = ['create_new_file', 'append_memory', 'update_memory', 'archive_memory', 'delete_memory'];
         const writeCalls = toolCallLog.filter(e => writeTools.includes(e.name));

@@ -1,22 +1,24 @@
 /**
- * MemoryStorageBackend — Swappable storage interface + tool executor factories.
+ * Tool executor factories — the bridge between the agentic tool loop and storage.
  *
- * Every backend must implement:
- *   init() → void
- *   read(path) → string | null
- *   write(path, content) → void
- *   delete(path) → void
- *   exists(path) → boolean
- *   ls(dirPath) → { files: [], dirs: [] }
- *   search(query) → [{ path, snippet }]
- *   getIndex() → string
- *   rebuildIndex() → void
- *   exportAll() → [{ path, content, updatedAt, itemCount, l0 }]
+ * Architecture:
+ *   retrieval.js / extractor.js  — define tool schemas (what the LLM sees)
+ *   executors.js (this file)     — implement those tools (what runs when called)
+ *   toolLoop.js                  — generic engine that connects the two
+ *
+ * Each factory takes a storage backend and returns an object mapping
+ * tool names to async functions: { tool_name: async (args) => resultString }
  */
+import {
+    compactBullets,
+    inferTopicFromPath,
+    normalizeFactText,
+    parseMemoryBullets,
+    renderCompactedMemoryDocument,
+} from '../bullets/index.js';
 
 /**
  * Build tool executors for the retrieval (read) flow.
- * @param {object} backend — storage backend implementing the interface above
  */
 export function createRetrievalExecutors(backend) {
     return {
@@ -25,18 +27,15 @@ export function createRetrievalExecutors(backend) {
             return JSON.stringify({ files, dirs });
         },
         retrieve_file: async ({ query }) => {
-            // Search file contents for the query
             const results = await backend.search(query);
             const contentPaths = results.map(r => r.path);
 
-            // Also match against file paths (the LLM may search by path)
             const allFiles = await backend.exportAll();
             const queryLower = query.toLowerCase();
             const pathMatches = allFiles
                 .filter(f => !f.path.endsWith('_index.md') && f.path.toLowerCase().includes(queryLower))
                 .map(f => f.path);
 
-            // Deduplicate, path matches first
             const seen = new Set();
             const paths = [];
             for (const p of [...pathMatches, ...contentPaths]) {
@@ -55,8 +54,8 @@ export function createRetrievalExecutors(backend) {
 
 /**
  * Build tool executors for the extraction (write) flow.
- * @param {object} backend — storage backend implementing the interface above
- * @param {object} helpers — optional { normalizeContent, mergeWithExisting, refreshIndex }
+ * @param {object} backend — storage backend
+ * @param {object} [helpers] — { normalizeContent, mergeWithExisting, refreshIndex }
  */
 export function createExtractionExecutors(backend, helpers = {}) {
     const { normalizeContent, mergeWithExisting, refreshIndex } = helpers;
@@ -101,9 +100,10 @@ export function createExtractionExecutors(backend, helpers = {}) {
         archive_memory: async ({ path, item_text }) => {
             const existing = await backend.read(path);
             if (!existing) return JSON.stringify({ error: `File not found: ${path}` });
-            const lines = existing.split('\n');
-            const filtered = lines.filter(line => !line.includes(item_text));
-            const newContent = filtered.join('\n').trim();
+            const newContent = removeArchivedItem(existing, item_text, path);
+            if (newContent === null) {
+                return JSON.stringify({ error: `Could not find an exact memory item match in: ${path}` });
+            }
             await backend.write(path, newContent);
             if (refreshIndex) await refreshIndex(path);
             return JSON.stringify({ success: true, path, action: 'archived', removed: item_text });
@@ -117,4 +117,38 @@ export function createExtractionExecutors(backend, helpers = {}) {
             return JSON.stringify({ success: true, path, action: 'deleted' });
         }
     };
+}
+
+function removeArchivedItem(content, itemText, path) {
+    const raw = String(content || '');
+    const target = normalizeFactText(itemText);
+    if (!target) return null;
+
+    const parsed = parseMemoryBullets(raw);
+    if (parsed.length > 0) {
+        const remaining = parsed.filter((bullet) => normalizeFactText(bullet.text) !== target);
+        if (remaining.length === parsed.length) return null;
+        const compacted = compactBullets(remaining, { defaultTopic: inferTopicFromPath(path), maxActivePerTopic: 1000 });
+        return renderCompactedMemoryDocument(
+            compacted.working, compacted.longTerm, compacted.history,
+            { titleTopic: inferTopicFromPath(path) }
+        );
+    }
+
+    const lines = raw.split('\n');
+    let removed = false;
+    const filtered = lines.filter((line) => {
+        const trimmed = line.trim();
+        const normalized = trimmed.startsWith('- ')
+            ? normalizeFactText(trimmed.slice(2))
+            : normalizeFactText(trimmed);
+        if (!removed && normalized === target) {
+            removed = true;
+            return false;
+        }
+        return true;
+    });
+
+    if (!removed) return null;
+    return filtered.join('\n').trim();
 }

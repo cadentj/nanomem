@@ -1,320 +1,240 @@
-# Memory System Documentation
+# Memory System Internals
 
-This document explains how the `@openanonymity/memory` repository works as a whole.
+This document covers the implementation details of `@openanonymity/memory`. For the user-facing API, see the [README](../README.md).
 
-## Overview
-
-`@openanonymity/memory` is an LLM-driven personal memory system built around a markdown-backed virtual filesystem.
-
-The system has three main jobs:
-
-1. Extract reusable facts from conversations into memory files.
-2. Retrieve relevant memory context for a new query.
-3. Compact and normalize stored memory over time.
-
-The central design choice is that memory is stored as ordinary markdown documents with metadata-rich bullets, rather than hidden vector-only state or a proprietary database schema.
-
-## Core Architecture
-
-The public entry point is `createMemory()` in `src/index.js`.
-
-It wires together:
-
-- an LLM client
-- a storage backend
-- a bullet index
-- the retrieval module
-- the extraction module
-- the compactor
-
-At runtime, the system looks like this:
+## Architecture
 
 ```text
-Conversation / Query
-        |
-        v
-  Retrieval or Extraction
-        |
-        v
-  Tool-calling loop
-        |
-        v
-  Storage backend <-> markdown files
-        |
-        v
-   Bullet parsing / compaction / indexing
+src/
+  index.js              — entry point, public API factory
+  core/
+    retrieval.js        — read path: find relevant memories
+    extractor.js        — write path: save new memories
+    compactor.js        — maintenance: consolidate memories
+    executors.js        — bridge: translates LLM tool calls into storage operations
+    toolLoop.js         — generic agentic tool-calling loop engine
+  bullets/
+    normalize.js        — metadata normalization (source, confidence, tier, etc.)
+    parser.js           — parse/render markdown bullets
+    scoring.js          — relevance scoring for retrieval
+    compaction.js       — deduplication, tier assignment, strength ordering
+    bulletIndex.js      — in-memory cache of parsed bullets
+    index.js            — barrel re-export
+  storage/
+    BaseStorage.js      — abstract interface + shared logic
+    ram.js              — in-memory backend (testing/ephemeral)
+    filesystem.js       — Node.js filesystem backend
+    indexeddb.js        — browser IndexedDB backend
+  llm/
+    openai.js           — OpenAI-compatible API client
+    anthropic.js        — Anthropic Messages API client
+  schema/
+    memorySchema.js     — bootstrap and index generation
+  imports/
+    oaFastchat.js       — conversation import from OA Fastchat exports
 ```
 
-## Main Modules
+Three layers:
 
-### `src/index.js`
+1. **Core flows** (`core/`) — retrieval, extraction, compaction. The "what."
+2. **Data format** (`bullets/`) — parsing, normalization, scoring, compaction logic. The "shape of data."
+3. **Infrastructure** (`storage/`, `llm/`) — where bytes live, how to talk to LLMs. The "how."
 
-This is the factory and public API surface.
+## The Two Indexes
 
-It exposes:
+The system has two indexes that serve different purposes at different granularities.
 
-- `init()`
-- `retrieve(query, options)`
-- `extract(messages, options)`
-- `compact()`
-- `maybeCompact()`
-- direct storage helpers like `read`, `write`, `search`, `ls`, `delete`, `exportAll`
+### File index (`_index.md`) — persistent, for the LLM
 
-It also selects the storage backend and LLM client implementation.
+A markdown file stored in the storage backend. Lists every memory file with path, item count, last-updated date, and a one-line summary (`l0`).
 
-### `src/core/extractor.js`
+```markdown
+# Memory Index
 
-The extractor is the write path.
-
-It takes a conversation, gives the model a constrained tool set, and asks it to decide whether anything should be saved. The model can:
-
-- read an existing file
-- create a new file
-- append to a file
-- update a file
-- archive an item
-- delete a file
-
-Generated content is normalized through the bullet utilities before being written, so extracted memory follows the repo’s canonical format.
-
-### `src/core/retrieval.js`
-
-The retrieval module is the read path.
-
-It uses a tool-calling loop to let the model inspect the memory index, search files, read specific files, and assemble final context for the current query.
-
-Important behavior:
-
-- retrieval can use recent conversation context to resolve references like `that` or `the same`
-- there is a quick path for some common domains
-- there is a non-LLM fallback using text search if the model call fails
-- retrieval returns curated memory context rather than the full database
-
-### `src/core/compactor.js`
-
-The compactor consolidates memory files into stable `Working`, `Long-Term`, and `History` sections.
-
-It is responsible for:
-
-- deduplication
-- moving expired or stale items into history
-- conflict resolution
-- keeping files readable and bounded
-
-If a file already parses as structured memory bullets, the system prefers deterministic local compaction. If it cannot parse the file structure, it can fall back to LLM rewriting.
-
-### `src/bullets/utils.js`
-
-This file is the heart of the local memory format.
-
-It handles:
-
-- bullet parsing
-- metadata normalization
-- rendering bullets back to markdown
-- topic normalization
-- scoring bullets for retrieval
-- local compaction rules
-- conflict resolution
-
-This module is where the canonical bullet schema lives.
-
-### `src/bullets/bulletIndex.js`
-
-The bullet index is a lightweight in-memory index over parsed bullets.
-
-It is used mainly to:
-
-- speed up snippet-based retrieval
-- avoid reparsing everything for every request
-- support quick relevance scoring
-
-The index is refreshed per path after writes and can be fully rebuilt.
-
-### `src/storage/*`
-
-The storage layer abstracts where markdown memory files live.
-
-Current implementations:
-
-- `src/storage/memory.js`: in-memory storage for tests and ephemeral use
-- `src/storage/filesystem.js`: real `.md` files on disk in Node.js
-- `src/storage/indexeddb.js`: browser persistence via IndexedDB
-- `src/storage/interface.js`: tool executors used by retrieval and extraction
-
-All storage backends share the same logical model and expose the same interface.
-
-### `src/schema/memorySchema.js`
-
-This defines the memory filesystem structure and bootstrap behavior.
-
-It provides:
-
-- namespace guidance like `personal/`, `health/`, `work/`, `preferences/`
-- index rendering
-- default seed files
-- extractor taxonomy guidance
-
-## Data Model
-
-Memory is stored as markdown bullet points with metadata.
-
-Example:
-
-```md
-- Takes thyroid medication daily | topic=health | tier=long_term | status=active | source=user_statement | confidence=high | updated_at=2026-03-22
+- health/allergies.md (2 items, updated 2025-03-12) — Allergic to peanuts; Allergic to shellfish
+- work/role.md (3 items, updated 2025-03-10) — Software engineer at Acme; Leads backend team
 ```
 
-Important metadata fields:
+- Rebuilt every time a file is written or deleted (`storage.rebuildIndex()`)
+- The `l0` summary is generated by `BaseStorage._generateL0()` — it takes the first few bullet texts or headings
+- The retrieval and extraction LLMs read this to decide which files to open without reading every file
 
-- `topic`: normalized topic namespace
-- `tier`: `working`, `long_term`, or `history`
-- `status`: `active`, `superseded`, `expired`, or `uncertain`
-- `source`: `user_statement`, `assistant_summary`, `inference`, or `system`
-- `confidence`: `high`, `medium`, or `low`
-- `updated_at`
-- optional `review_at`
-- optional `expires_at`
+### Bullet index (`MemoryBulletIndex`) — in-memory, for scoring
 
-## File Layout
+A RAM-only cache mapping file paths to pre-parsed bullet objects:
 
-Each memory file is expected to converge toward this structure:
-
-```md
-# Memory: Topic
-
-## Working
-### Current context
-- ...
-
-## Long-Term
-### Stable facts
-- ...
-
-## History
-### No longer current
-- ...
+```
+_pathToBullets: Map {
+  'health/allergies.md' → [{ text: "Allergic to peanuts", source: "user_statement", ... }, ...],
+  'work/role.md'        → [{ text: "Software engineer at Acme", ... }, ...]
+}
 ```
 
-The repo also maintains `_index.md`, which acts as the top-level file index for retrieval.
+- Not persisted — rebuilt from storage on first access
+- Refreshed per-path after each write (`bulletIndex.refreshPath(path)`)
+- Used during retrieval: after the LLM selects files, the system scores individual bullets against the query using `scoreMemoryBullet()` and assembles the top-scoring snippets
+
+### Why two?
+
+| | File index (`_index.md`) | Bullet index (RAM) |
+|---|---|---|
+| Consumer | The LLM | The scoring system |
+| Granularity | File-level | Bullet-level |
+| Persisted | Yes | No |
+| Purpose | "Which files should I read?" | "Which facts are most relevant?" |
+
+Both are updated on every write/delete to stay in sync.
 
 ## End-to-End Flows
 
-### 1. Extraction flow
+### Extraction (write path)
 
-1. The app calls `memory.extract(messages)`.
-2. The extractor builds a system prompt with the current index and filesystem taxonomy.
-3. The LLM runs in a tool loop and decides whether to create or modify files.
-4. Storage executors normalize generated bullet content.
-5. The bullet index is refreshed after writes.
+```
+memory.extract(messages)
+        │
+        ▼
+  Extractor builds system prompt with current _index.md
+        │
+        ▼
+  LLM runs in tool loop (toolLoop.js)
+    - reads existing files to check for duplicates
+    - calls create_new_file / append_memory / update_memory / etc.
+        │
+        ▼
+  Executors (executors.js) handle each tool call:
+    - normalizeContent: parses bullets, normalizes metadata, compacts
+    - mergeWithExisting: merges new bullets with existing file content
+    - writes to storage backend
+        │
+        ▼
+  Both indexes updated:
+    - storage.write() triggers rebuildIndex() → _index.md refreshed
+    - refreshIndex() → bulletIndex re-parses the written file
+```
 
-### 2. Retrieval flow
+### Retrieval (read path)
 
-1. The app calls `memory.retrieve(query, options)`.
-2. The retriever loads `_index.md`.
-3. It may take a quick local path for common domains.
-4. Otherwise the LLM selects files through tool calls.
-5. The retriever assembles a concise memory context payload.
-6. If the LLM path fails, retrieval falls back to text search.
+```
+memory.retrieve(query)
+        │
+        ▼
+  1. LLM reads _index.md (file index)
+     → sees file summaries, decides which to open
+        │
+        ▼
+  2. LLM calls read_file / retrieve_file / list_directory
+     → navigates the memory filesystem
+        │
+        ▼
+  3. LLM calls append_mem_to_query with curated context
+        │
+        ▼
+  4. System uses bulletIndex to score individual bullets
+     from selected files against query terms
+     → assembles top-scoring snippets as final context
+        │
+        ▼
+  Returns { files, paths, assembledContext }
+```
 
-### 3. Compaction flow
+If the LLM call fails, retrieval falls back to brute-force text search across all files.
 
-1. The app calls `memory.compact()` or `memory.maybeCompact()`.
-2. All real memory files are loaded.
-3. Structured files are compacted locally.
-4. Legacy or malformed files can be rewritten with the LLM.
-5. Updated files are written back and reindexed.
+If `conversationText` is provided, it's included in the retrieval prompt so the LLM can resolve references like "that", "the same one", "what we discussed."
 
-## Conflict Resolution
+### Compaction (maintenance)
 
-Conflict resolution is built into bullet compaction.
+```
+memory.compact()
+        │
+        ▼
+  For each memory file:
+    - If file has structured bullets → deterministic local compaction
+      (dedup by normalized text, sort by strength, enforce per-topic limits)
+    - If unstructured/legacy content → LLM rewrite into canonical format
+        │
+        ▼
+  Write back compacted content, refresh both indexes
+```
 
-Current policy:
+The host application decides when to call `compact()`. The library does not schedule it.
 
-- newer explicit user statements supersede older explicit user statements
-- user statements beat inferences
-- conflicting inferred facts prefer newer or higher-confidence versions
-- ambiguous conflicts keep both, with the weaker one marked `uncertain`
+## Core Module Relationships
 
-See `docs/conflict-resolution.md` for details.
+```text
+retrieval.js / extractor.js  — define tool schemas (what the LLM sees)
+executors.js                 — implement those tools (what runs when called)
+toolLoop.js                  — generic engine connecting the two
+```
+
+The executors are the bridge between the tool loop and storage. They translate tool calls like `read_file`, `append_memory` into storage operations.
+
+Extraction executors accept three injectable helpers from extractor.js:
+- `normalizeContent(content, path)` — normalize bullet metadata before writing
+- `mergeWithExisting(existing, incoming, path)` — merge new bullets with existing file content, dedup
+- `refreshIndex(path)` — update the bullet index after a write
+
+This keeps the executors as pure storage I/O. The bullet-format knowledge lives in the extractor.
+
+## Data Model
+
+### Bullet metadata
+
+Each bullet can carry:
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `topic` | any string | Normalized topic name |
+| `tier` | `working`, `long_term`, `history` | Temporal classification |
+| `status` | `active`, `superseded`, `expired`, `uncertain` | Current validity |
+| `source` | `user_statement`, `assistant_summary`, `inference`, `system` | Where the fact came from |
+| `confidence` | `high`, `medium`, `low` | How certain we are |
+| `updated_at` | ISO date | When last modified |
+| `review_at` | ISO date (optional) | When to revisit working-tier items |
+| `expires_at` | ISO date (optional) | Auto-expire to history |
+
+### Strength ordering
+
+When compaction encounters duplicate facts (same normalized text), it keeps the stronger variant:
+
+1. Higher source priority: `user_statement` > `assistant_summary` > `system` > `inference`
+2. Higher confidence: `high` > `medium` > `low`
+3. More recent `updated_at`
+
+### Conflict resolution
+
+Semantic conflict detection (recognizing that "I am vegetarian" contradicts "I like steak") is delegated to the LLM during extraction. The extractor reads existing files before writing and can make that judgment contextually.
+
+The compaction layer handles mechanical concerns: deduplication, expiration, and strength-based ordering. It does not attempt heuristic NLP conflict detection.
 
 ## Storage Interface
 
-Every backend implements the same contract:
+All backends extend `BaseStorage`. Subclasses implement seven methods:
 
-```text
-init()                -> void
-read(path)            -> string | null
-write(path, content)  -> void
-delete(path)          -> void
-exists(path)          -> boolean
-ls(dirPath)           -> { files: string[], dirs: string[] }
-search(query)         -> [{ path, snippet }]
-getIndex()            -> string
-rebuildIndex()        -> void
-exportAll()           -> [{ path, content, updatedAt, itemCount, l0 }]
+```
+init()                → void
+read(path)            → string | null
+write(path, content)  → void
+delete(path)          → void
+exists(path)          → boolean
+rebuildIndex()        → void
+exportAll()           → [{ path, content, updatedAt, itemCount, l0 }]
 ```
 
-This lets the same retrieval and extraction logic run unchanged across browser, Node.js, and in-memory environments.
+`BaseStorage` provides default implementations for:
+- `search(query)` — substring search across all file contents
+- `ls(dirPath)` — directory listing derived from file paths
+- `getIndex()` — reads `_index.md`
+- `_generateL0(content)` — one-line summary from bullet texts or headings
+- `_parentPath(filePath)` — extract parent directory
 
-## LLM Integration Model
-
-The repo uses tool-calling rather than asking the model for a full memory dump or full-memory rewrite on every interaction.
-
-That means:
-
-- the model makes bounded decisions through explicit tools
-- storage remains inspectable and editable as markdown
-- local deterministic logic can handle normalization and compaction
-- failures can fall back to simpler logic
-
-LLM providers are abstracted behind `createChatCompletion()` style clients.
-
-Supported paths today:
-
-- OpenAI-compatible APIs
-- Anthropic
-- custom clients
-
-## Design Principles
-
-The codebase is built around a few consistent principles:
-
-- markdown-first storage
-- topic-scoped files instead of one giant profile blob
-- tool-mediated LLM actions
-- deterministic local post-processing where possible
-- graceful fallback behavior
-- durable separation of current facts and historical facts
-
-## Extension Points
-
-Common ways to extend the system:
-
-- add a new storage backend implementing the standard interface
-- improve conflict classification in `src/bullets/utils.js`
-- add richer retrieval heuristics in `src/core/retrieval.js`
-- expand filesystem taxonomy in `src/schema/memorySchema.js`
-- plug in another LLM provider through the same client contract
-
-## Current Limitations
-
-- conflict detection is heuristic rather than full semantic contradiction detection
-- retrieval quality still depends on the model choosing the right files
-- search is text-based, not embedding-based
-- compaction can only be as clean as the underlying bullet structure allows
-- there is not yet a separate formal schema versioning or migration layer
+Subclasses can override `_listAllPaths()` for more efficient `ls()` (e.g. filesystem backend avoids reading file contents just to list paths).
 
 ## Recommended Reading Order
 
-If you are new to the repo, read files in this order:
-
-1. `src/index.js`
-2. `src/core/extractor.js`
-3. `src/core/retrieval.js`
-4. `src/core/compactor.js`
-5. `src/bullets/utils.js`
-6. `src/storage/interface.js`
-7. `src/schema/memorySchema.js`
-
-That sequence gives the cleanest view from public API down to data model and storage details.
+1. `src/index.js` — public API and wiring
+2. `src/core/retrieval.js` — read path
+3. `src/core/extractor.js` — write path
+4. `src/core/executors.js` — tool implementations
+5. `src/core/toolLoop.js` — generic agentic loop
+6. `src/bullets/` — data format layer (start with `parser.js`, then `normalize.js`)
+7. `src/storage/BaseStorage.js` — storage interface

@@ -1,42 +1,23 @@
 /**
  * MemoryFileSystem — Virtual markdown filesystem backed by IndexedDB.
  *
- * Stores memory files as markdown in a separate 'oa-memory-fs' database.
- * Each file has a path (keyPath), content, a one-line summary (l0),
- * a parentPath index for directory listing, and timestamps.
- *
- * The LLM reads the root _index.md to decide which files to load —
- * like a human doing grep.
+ * Browser-only. Stores memory files in a separate 'oa-memory-fs' database.
  */
-
-import {
-    countMemoryBullets,
-    extractMemoryTitles,
-    parseMemoryBullets,
-} from '../bullets/utils.js';
+import { BaseStorage } from './BaseStorage.js';
+import { countMemoryBullets, extractMemoryTitles } from '../bullets/index.js';
+import { buildMemoryIndex, createBootstrapRecords } from '../schema/memorySchema.js';
 
 const DB_NAME = 'oa-memory-fs';
 const DB_VERSION = 1;
 const STORE_NAME = 'memoryFiles';
 
-const BOOTSTRAP_INDEX = `# Memory Index
-
-## Structure
-- personal/ — User background, preferences, interests, career
-- projects/ — One file per project (e.g. projects/recipe-app.md)
-
-_No memories yet._
-`;
-
-class MemoryFileSystem {
+class MemoryFileSystem extends BaseStorage {
     constructor() {
+        super();
         this.db = null;
         this._initPromise = null;
     }
 
-    /**
-     * Open the database and bootstrap default files if empty.
-     */
     async init() {
         if (this.db) return this.db;
         if (this._initPromise) return this._initPromise;
@@ -71,35 +52,21 @@ class MemoryFileSystem {
         return this._initPromise;
     }
 
-    /**
-     * Seed default index files if the database is empty.
-     */
     async _bootstrap() {
         const all = await this._getAll();
         if (all.length > 0) return;
 
-        const now = Date.now();
-        const seeds = [
-            { path: '_index.md', content: BOOTSTRAP_INDEX, l0: 'Root index of memory filesystem', parentPath: '', createdAt: now, updatedAt: now },
-            { path: 'personal/about.md', content: '', l0: '', itemCount: 0, titles: [], parentPath: 'personal', createdAt: now, updatedAt: now },
-            { path: 'projects/about.md', content: '', l0: '', itemCount: 0, titles: [], parentPath: 'projects', createdAt: now, updatedAt: now },
-        ];
-
+        const seeds = createBootstrapRecords(Date.now());
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
             for (const seed of seeds) {
                 store.put(seed);
             }
-            tx.oncomplete = () => {
-                console.log('[MemoryFS] Bootstrapped default files');
-                resolve();
-            };
+            tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
         });
     }
-
-    // ─── Core CRUD ───────────────────────────────────────────────
 
     async read(path) {
         await this.init();
@@ -113,7 +80,6 @@ class MemoryFileSystem {
 
     async write(path, content) {
         await this.init();
-        const parentPath = this._parentPath(path);
         const now = Date.now();
         const existing = await this._get(path);
         const nextContent = String(content || '');
@@ -124,7 +90,7 @@ class MemoryFileSystem {
             l0: this._generateL0(nextContent),
             itemCount: countMemoryBullets(nextContent),
             titles: extractMemoryTitles(nextContent),
-            parentPath,
+            parentPath: this._parentPath(path),
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
         };
@@ -135,18 +101,11 @@ class MemoryFileSystem {
             request.onsuccess = () => resolve();
             request.onerror = () => reject(request.error);
         });
-
-        // Rebuild root index (non-blocking)
-        this.rebuildIndex().catch(err =>
-            console.warn('[MemoryFS] Index rebuild error:', err)
-        );
+        await this.rebuildIndex();
     }
 
     async delete(path) {
-        if (path.endsWith('_index.md')) {
-            console.warn('[MemoryFS] Cannot delete index files:', path);
-            return;
-        }
+        if (path.endsWith('_index.md')) return;
         await this.init();
 
         await new Promise((resolve, reject) => {
@@ -155,10 +114,7 @@ class MemoryFileSystem {
             request.onsuccess = () => resolve();
             request.onerror = () => reject(request.error);
         });
-
-        this.rebuildIndex().catch(err =>
-            console.warn('[MemoryFS] Index rebuild error:', err)
-        );
+        await this.rebuildIndex();
     }
 
     async exists(path) {
@@ -171,93 +127,19 @@ class MemoryFileSystem {
         });
     }
 
-    // ─── Directory Operations ────────────────────────────────────
-
-    async ls(dirPath) {
-        await this.init();
-        const all = await this._getAll();
-        const prefix = dirPath ? dirPath + '/' : '';
-        const files = [];
-        const dirSet = new Set();
-
-        for (const rec of all) {
-            if (prefix && !rec.path.startsWith(prefix)) continue;
-            if (!prefix && rec.path === '_index.md') continue;
-
-            const relative = rec.path.slice(prefix.length);
-            if (!relative.includes('/')) {
-                files.push(rec.path);
-            } else {
-                dirSet.add(relative.split('/')[0]);
-            }
-        }
-
-        return { files, dirs: [...dirSet] };
-    }
-
-    // ─── Search ──────────────────────────────────────────────────
-
-    async search(query) {
-        await this.init();
-        if (!query || !query.trim()) return [];
-        const lowerQuery = query.toLowerCase();
-        const all = await this._getAll();
-        const results = [];
-
-        for (const rec of all) {
-            if (rec.path.endsWith('_index.md')) continue;
-            const idx = (rec.content || '').toLowerCase().indexOf(lowerQuery);
-            if (idx === -1) continue;
-            const start = Math.max(0, idx - 40);
-            const end = Math.min(rec.content.length, idx + query.length + 40);
-            results.push({
-                path: rec.path,
-                snippet: (start > 0 ? '...' : '') + rec.content.slice(start, end) + (end < rec.content.length ? '...' : ''),
-            });
-        }
-
-        return results;
-    }
-
-    // ─── Index Management ────────────────────────────────────────
-
-    async getIndex() {
-        return this.read('_index.md');
-    }
-
     async rebuildIndex() {
         await this.init();
         const all = await this._getAll();
         const files = all
             .filter(r => !r.path.endsWith('_index.md'))
             .sort((a, b) => a.path.localeCompare(b.path));
-
-        let indexContent = '# Memory Index\n\n';
-        indexContent += '## Structure\n';
-        indexContent += '- personal/ — User background, preferences, interests, career\n';
-        indexContent += '- projects/ — One file per project (e.g. projects/recipe-app.md)\n\n';
-
-        if (files.length > 0) {
-            indexContent += '## Files\n';
-            for (const f of files) {
-                const count = f.itemCount || 0;
-                const updated = f.updatedAt ? new Date(f.updatedAt).toISOString().split('T')[0] : '';
-                const meta = count > 0
-                    ? `(${count} item${count !== 1 ? 's' : ''}, updated ${updated})`
-                    : updated ? `(updated ${updated})` : '';
-                indexContent += `- ${f.path} ${meta} — ${f.l0}\n`;
-            }
-        } else {
-            indexContent += '_No files yet._\n';
-        }
-
+        const indexContent = buildMemoryIndex(files);
         const existing = await this._get('_index.md');
         const now = Date.now();
 
         await new Promise((resolve, reject) => {
             const tx = this.db.transaction(STORE_NAME, 'readwrite');
-            const store = tx.objectStore(STORE_NAME);
-            store.put({
+            tx.objectStore(STORE_NAME).put({
                 path: '_index.md',
                 content: indexContent,
                 l0: 'Root index of memory filesystem',
@@ -270,50 +152,12 @@ class MemoryFileSystem {
         });
     }
 
-    // ─── Export ──────────────────────────────────────────────────
-
     async exportAll() {
         await this.init();
         return this._getAll();
     }
 
-    // ─── Internal Helpers ────────────────────────────────────────
-
-    _parentPath(filePath) {
-        const lastSlash = filePath.lastIndexOf('/');
-        return lastSlash === -1 ? '' : filePath.slice(0, lastSlash);
-    }
-
-    _generateL0(content) {
-        if (!content) return '';
-
-        const bullets = parseMemoryBullets(content);
-        if (bullets.length > 0) {
-            const factTexts = bullets
-                .filter(b => b.section !== 'archive')
-                .slice(0, 4)
-                .map(b => b.text.trim())
-                .filter(Boolean);
-            if (factTexts.length > 0) {
-                const joined = factTexts.join('; ');
-                return joined.length > 120 ? joined.slice(0, 117) + '...' : joined;
-            }
-        }
-
-        const titles = extractMemoryTitles(content);
-        if (titles.length > 0) {
-            const joined = titles.join('; ');
-            return joined.length > 120 ? joined.slice(0, 117) + '...' : joined;
-        }
-
-        const lines = content.split('\n');
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
-            return trimmed.length > 120 ? trimmed.slice(0, 117) + '...' : trimmed;
-        }
-        return content.slice(0, 120);
-    }
+    // ─── Internal IndexedDB helpers ─────────────────────────────
 
     async _get(path) {
         return new Promise((resolve, reject) => {
@@ -329,26 +173,6 @@ class MemoryFileSystem {
             const tx = this.db.transaction(STORE_NAME, 'readonly');
             const request = tx.objectStore(STORE_NAME).getAll();
             request.onsuccess = () => resolve(request.result || []);
-            request.onerror = () => reject(request.error);
-        });
-    }
-
-    async _getByParent(parentPath) {
-        return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(STORE_NAME, 'readonly');
-            const index = tx.objectStore(STORE_NAME).index('parentPath');
-            const results = [];
-            const request = index.openCursor(IDBKeyRange.only(parentPath));
-
-            request.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    results.push(cursor.value);
-                    cursor.continue();
-                } else {
-                    resolve(results);
-                }
-            };
             request.onerror = () => reject(request.error);
         });
     }

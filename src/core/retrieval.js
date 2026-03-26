@@ -6,26 +6,19 @@
  * search if the LLM call fails.
  */
 import { runAgenticToolLoop } from './toolLoop.js';
-import { createRetrievalExecutors } from '../storage/interface.js';
+import { createRetrievalExecutors } from './executors.js';
 import {
     normalizeFactText,
     parseMemoryBullets,
     renderMemoryBullet,
     scoreMemoryBullet,
     tokenizeQuery
-} from '../bullets/utils.js';
+} from '../bullets/index.js';
 
 const MAX_FILES_TO_LOAD = 8;
 const MAX_TOTAL_CONTEXT_CHARS = 4000;
 const MAX_SNIPPETS = 18;
 const MAX_RECENT_CONTEXT_CHARS = 2000;
-const FAST_DOMAIN_HINTS = [
-    { dir: 'health', terms: ['allergy', 'allergies', 'health', 'medical', 'medicine', 'medication', 'symptom', 'condition'] },
-    { dir: 'pets', terms: ['pet', 'pets', 'cat', 'dog', 'animal'] },
-    { dir: 'work', terms: ['work', 'job', 'career', 'role', 'team', 'tech', 'stack', 'typescript', 'postgresql', 'backend'] },
-    { dir: 'personal', terms: ['live', 'location', 'family', 'personal', 'background'] },
-    { dir: 'preferences', terms: ['prefer', 'preference', 'style', 'favorite', 'diet'] },
-];
 
 const RETRIEVAL_TOOLS = [
     {
@@ -103,9 +96,8 @@ Instructions:
 6. If nothing is relevant, call append_mem_to_query with an empty string.
 
 IMPORTANT — Domain-exhaustive retrieval:
-- For health, medicine, or medical queries: read ALL files in health/. Every health condition is potentially relevant to medication, treatment, or wellness questions — even if the file description does not mention "medication" explicitly.
+- When a query touches a domain (health, work, personal), prefer completeness over selectivity within that domain. File descriptions may be incomplete.
 - For family-related queries: check personal/family.md AND any health files about family members.
-- More generally: when a query touches a domain (health, work, personal), prefer completeness over selectivity within that domain. File descriptions may be incomplete — a file about "narcolepsy" is relevant to a "what medicine should I buy" query even though neither word appears in the other.
 
 When recent conversation context is provided alongside the query, use it to resolve references like "that", "the same", "what we discussed", etc. The conversation shows what the user has been talking about recently.
 
@@ -113,27 +105,32 @@ Only include content that genuinely helps answer this specific query. Do not inc
 
 
 class MemoryRetrieval {
-    constructor({ backend, bulletIndex, llmClient, model }) {
+    /**
+     * @param {object} deps
+     * @param {Function} [deps.onProgress] — callback({ stage, message, tool?, args?, paths? })
+     * @param {Function} [deps.onModelText] — callback for intermediate model text
+     */
+    constructor({ backend, bulletIndex, llmClient, model, onProgress, onModelText }) {
         this._backend = backend;
         this._bulletIndex = bulletIndex;
         this._llmClient = llmClient;
         this._model = model;
+        this._onProgress = onProgress || null;
+        this._onModelText = onModelText || null;
     }
 
     /**
      * Retrieve relevant memory context for a user query.
+     *
      * @param {string} query — the user's message text
-     * @param {object} [options]
-     * @param {Function} [options.onProgress] — progress callback
-     * @param {string} [options.conversationText] — current session text to filter out redundant facts
-     * @param {Function} [options.onModelText] — callback for intermediate model text
-     * @param {AbortSignal} [options.signal] — cancellation signal
-     * @returns {Promise<{files: {path: string, content: string}[], paths: string[], assembledContext: string|null}|null>}
+     * @param {string} [conversationText] — current session text for reference resolution
+     * @returns {Promise<{files: {path, content}[], paths: string[], assembledContext: string|null}|null>}
      */
-    async retrieveForQuery(query, options = {}) {
+    async retrieveForQuery(query, conversationText) {
         if (!query || !query.trim()) return null;
 
-        const { onProgress, conversationText, onModelText, signal } = options;
+        const onProgress = this._onProgress;
+        const onModelText = this._onModelText;
 
         try {
             onProgress?.({ stage: 'init', message: 'Reading memory index...' });
@@ -146,16 +143,9 @@ class MemoryRetrieval {
 
             let result;
             try {
-                const quickResult = await this._quickDomainRetrieval(query, onProgress, conversationText);
-                if (quickResult) {
-                    return quickResult;
-                }
-
-                // Try LLM-driven retrieval
                 onProgress?.({ stage: 'retrieval', message: 'Selecting relevant memory files...' });
-                result = await this._toolCallingRetrieval(query, index, onProgress, conversationText, onModelText, signal);
+                result = await this._toolCallingRetrieval(query, index, onProgress, conversationText, onModelText);
             } catch (err) {
-                // Fallback: brute-force text search
                 onProgress?.({ stage: 'retrieval', message: 'LLM unavailable, using fallback text search...' });
                 result = await this._textSearchFallbackWithLoad(query, onProgress, conversationText);
             }
@@ -172,18 +162,17 @@ class MemoryRetrieval {
         }
     }
 
-    async _toolCallingRetrieval(query, index, onProgress, conversationText, onModelText, signal) {
-        const systemPrompt = RETRIEVAL_SYSTEM_PROMPT.replace('{INDEX}', index);
+    async _toolCallingRetrieval(query, index, onProgress, conversationText, onModelText) {
+        const systemPrompt = RETRIEVAL_SYSTEM_PROMPT
+            .replace('{INDEX}', index);
         const toolExecutors = createRetrievalExecutors(this._backend);
 
-        // Include recent conversation context so the retrieval LLM can resolve
-        // references in follow-up queries (e.g. "tell me more about that")
         const recentContext = this._buildRecentContext(conversationText);
         const userContent = recentContext
             ? `Recent conversation:\n\`\`\`\n${recentContext}\n\`\`\`\n\nCurrent query: ${query}`
             : query;
 
-        const { terminalToolResult, toolCallLog, iterations } = await runAgenticToolLoop({
+        const { terminalToolResult, toolCallLog } = await runAgenticToolLoop({
             llmClient: this._llmClient,
             model: this._model,
             tools: RETRIEVAL_TOOLS,
@@ -202,11 +191,9 @@ class MemoryRetrieval {
             onModelText,
             onReasoning: (chunk, iteration) => {
                 onProgress?.({ stage: 'reasoning', message: chunk, iteration });
-            },
-            signal
+            }
         });
 
-        // Build files list from read_file calls in the log
         const files = [];
         const seenPaths = new Set();
         for (const entry of toolCallLog) {
@@ -227,7 +214,6 @@ class MemoryRetrieval {
 
         if (files.length === 0 && !assembledContext) return null;
 
-        // Build snippet-level context using bullet index for the approval UI
         const snippetContext = await this._buildSnippetContext(paths, query, conversationText);
 
         onProgress?.({
@@ -260,7 +246,6 @@ class MemoryRetrieval {
 
         if (files.length === 0) return null;
 
-        // Build snippet-level assembled context from fallback
         const assembled = await this._buildSnippetContext(files.map(f => f.path), query, conversationText);
 
         onProgress?.({
@@ -286,46 +271,6 @@ class MemoryRetrieval {
         return [...allPaths].slice(0, MAX_FILES_TO_LOAD);
     }
 
-    async _quickDomainRetrieval(query, onProgress, conversationText) {
-        const queryLower = String(query || '').toLowerCase();
-        const matchedDirs = FAST_DOMAIN_HINTS
-            .filter(({ terms }) => terms.some((term) => queryLower.includes(term)))
-            .map(({ dir }) => dir);
-
-        if (matchedDirs.length === 0) return null;
-
-        const allFiles = await this._backend.exportAll();
-        const paths = allFiles
-            .filter((file) => !file.path.endsWith('_index.md'))
-            .map((file) => file.path)
-            .filter((path) => matchedDirs.some((dir) => path === dir || path.startsWith(`${dir}/`)))
-            .slice(0, MAX_FILES_TO_LOAD);
-
-        if (paths.length === 0) return null;
-
-        onProgress?.({ stage: 'retrieval', message: 'Using fast local retrieval...', paths });
-
-        const files = [];
-        for (const path of paths) {
-            const raw = await this._backend.read(path);
-            if (!raw) continue;
-            files.push({ path, content: raw.length > 1500 ? raw.slice(0, 1500) + '...(truncated)' : raw });
-        }
-
-        if (files.length === 0) return null;
-
-        const assembledContext = await this._buildSnippetContext(paths, query, conversationText);
-        if (!assembledContext) return null;
-
-        onProgress?.({
-            stage: 'complete',
-            message: `Retrieved ${files.length} memory file${files.length === 1 ? '' : 's'} via fast path.`,
-            paths
-        });
-
-        return { files, paths, assembledContext };
-    }
-
     async _buildSnippetContext(paths, query, conversationText) {
         const queryTerms = tokenizeQuery(query);
         let candidates = [];
@@ -336,7 +281,6 @@ class MemoryRetrieval {
         await this._bulletIndex.init();
         const indexed = this._bulletIndex.getBulletsForPaths(paths);
 
-        // Keep a safe fallback for first-run races.
         if (indexed.length === 0) {
             for (const path of paths) {
                 await this._bulletIndex.refreshPath(path);
@@ -374,11 +318,11 @@ class MemoryRetrieval {
             }
         }
 
-        // Filter out bullets whose content is already in the current conversation
+        // Filter out bullets already present in the current conversation
         if (convWords && convWords.size > 0) {
             candidates = candidates.filter(c => {
                 const factWords = normalizeFactText(c.text).split(/\s+/).filter(w => w.length >= 3);
-                if (factWords.length < 2) return true; // Too short to judge
+                if (factWords.length < 2) return true;
                 const matchCount = factWords.filter(w => convWords.has(w)).length;
                 return matchCount / factWords.length < 0.8;
             });
@@ -411,9 +355,6 @@ class MemoryRetrieval {
         return sections.join('\n\n').trim() || null;
     }
 
-    /**
-     * Remove lines from assembled context whose key terms already appear in the conversation.
-     */
     _filterRedundantContext(assembledContext, conversationText) {
         const convWords = new Set(
             normalizeFactText(conversationText).split(/\s+/).filter(w => w.length >= 3)
@@ -423,7 +364,6 @@ class MemoryRetrieval {
         const lines = assembledContext.split('\n');
         const filtered = lines.filter(line => {
             const trimmed = line.trim();
-            // Keep headings, empty lines, and non-bullet lines
             if (!trimmed || trimmed.startsWith('#') || !trimmed.startsWith('-')) return true;
             const factWords = normalizeFactText(trimmed).split(/\s+/).filter(w => w.length >= 3);
             if (factWords.length < 2) return true;
@@ -476,7 +416,6 @@ class MemoryRetrieval {
         if (realFiles.length === 0) return true;
         return !realFiles.some(f => (f.itemCount || 0) > 0);
     }
-
 }
 
 export { MemoryRetrieval };
