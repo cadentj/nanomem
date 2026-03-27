@@ -149,15 +149,39 @@ There is no hardcoded folder structure. The LLM organizes files into folders nat
 
 ## Low-Level Access
 
-For advanced use, storage methods are available with `_` prefix:
+Direct storage operations are available via `memory.storage`:
 
 ```js
-await memory._read('health/allergies.md');
-await memory._write('health/allergies.md', content);
-await memory._search('peanut');
-await memory._ls('health');
-await memory._delete('temporary/old.md');
-await memory._exportAll();
+await memory.storage.read('health/allergies.md');
+await memory.storage.write('health/allergies.md', content);
+await memory.storage.search('peanut');
+await memory.storage.ls('health');
+await memory.storage.delete('temporary/old.md');
+await memory.storage.exportAll();
+```
+
+## Portability
+
+Export the entire memory state as a portable string or ZIP archive:
+
+```js
+import { deserialize } from '@openanonymity/memory';
+
+const str = await memory.serialize();   // single string, all files
+const zip = await memory.toZip();       // Uint8Array, valid ZIP
+
+// Reconstruct records from a serialized string
+const records = deserialize(str);       // [{ path, content }, ...]
+```
+
+The standalone functions also work directly on an `exportAll()` result:
+
+```js
+import { serialize, toZip } from '@openanonymity/memory/utils';
+
+const records = await memory.storage.exportAll();
+const str = serialize(records);
+const zip = toZip(records);
 ```
 
 ## Architecture

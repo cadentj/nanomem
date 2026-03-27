@@ -15,7 +15,7 @@
 
 import { createMemory } from './src/index.js';
 import { readFile } from 'node:fs/promises';
-import { extractSessionsFromOAFastchatExport } from './src/imports/index.js';
+import { extractSessionsFromOAFastchatExport } from './src/utils/oaFastchat.js';
 
 // ─── Config from env / CLI flag ──────────────────────────────
 // Usage:
@@ -123,7 +123,7 @@ console.log(`Total writeCalls=${totalWriteCalls}`);
 // ─── Step 2: Inspect what was saved ─────────────────────────
 
 console.log('\n--- STORED FILES ---');
-const allFiles = await memory._exportAll();
+const allFiles = await memory.storage.exportAll();
 for (const f of allFiles) {
     if (f.path === '_index.md') continue;
     const preview = (f.content || '').split('\n').filter(l => l.trim().startsWith('-')).slice(0, 3).join('\n  ');
@@ -159,7 +159,7 @@ console.log('Compaction complete');
 
 // Show final state
 console.log('\n--- FINAL STATE ---');
-const finalFiles = await memory._exportAll();
+const finalFiles = await memory.storage.exportAll();
 for (const f of finalFiles) {
     if (f.path === '_index.md') continue;
     if (!f.content?.trim()) continue;

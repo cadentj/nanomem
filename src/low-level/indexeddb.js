@@ -5,7 +5,7 @@
  */
 import { BaseStorage } from './BaseStorage.js';
 import { countMemoryBullets, extractMemoryTitles } from '../bullets/index.js';
-import { buildMemoryIndex, createBootstrapRecords } from '../schema/memorySchema.js';
+import { buildMemoryIndex, createBootstrapRecords } from './schema.js';
 
 const DB_NAME = 'oa-memory-fs';
 const DB_VERSION = 1;

@@ -3,17 +3,23 @@
  *
  * createMemory(config) is the main entry point.
  *
- * Public API: init, retrieve, extract, compact.
- * Low-level storage access is available via _-prefixed methods.
+ * Returned object has three named groups:
+ *
+ *   High-level (LLM-driven):  init, retrieve, extract, compact
+ *   Low-level  (storage ops): mem.storage.{ read, write, delete, exists,
+ *                                           search, ls, getIndex,
+ *                                           rebuildIndex, exportAll }
+ *   Utilities  (portability): mem.serialize(), mem.toZip()
  */
 
 import { createOpenAIClient } from './llm/openai.js';
 import { createAnthropicClient } from './llm/anthropic.js';
 import { MemoryBulletIndex } from './bullets/bulletIndex.js';
-import { MemoryRetrieval } from './core/retrieval.js';
-import { MemoryExtractor } from './core/extractor.js';
-import { MemoryCompactor } from './core/compactor.js';
-import { InMemoryStorage } from './storage/ram.js';
+import { MemoryRetrieval } from './high-level/retrieval.js';
+import { MemoryExtractor } from './high-level/extractor.js';
+import { MemoryCompactor } from './high-level/compactor.js';
+import { InMemoryStorage } from './low-level/ram.js';
+import { serialize, toZip } from './utils/portability.js';
 
 /**
  * Create a memory instance.
@@ -65,6 +71,8 @@ export function createMemory(config = {}) {
         /** Initialize the storage backend (creates seed files if empty). */
         init: () => backend.init(),
 
+        // ─── High-level (LLM-driven) ──────────────────────────────
+
         /**
          * Retrieve relevant memory context for a query.
          * @param {string} query
@@ -83,16 +91,27 @@ export function createMemory(config = {}) {
         /** Compact all memory files (dedup, archive stale facts). */
         compact: () => compactor.compactAll(),
 
-        // ─── Low-level storage (not for typical use) ─────────────
-        _read: (path) => backend.read(path),
-        _write: write,
-        _delete: remove,
-        _exists: (path) => backend.exists(path),
-        _search: (query) => backend.search(query),
-        _ls: (dirPath) => backend.ls(dirPath),
-        _getIndex: () => backend.getIndex(),
-        _rebuildIndex: rebuildIndex,
-        _exportAll: () => backend.exportAll(),
+        // ─── Low-level (direct storage ops) ──────────────────────
+
+        storage: {
+            read:         (path)          => backend.read(path),
+            write:        (path, content) => write(path, content),
+            delete:       (path)          => remove(path),
+            exists:       (path)          => backend.exists(path),
+            search:       (query)         => backend.search(query),
+            ls:           (dirPath)       => backend.ls(dirPath),
+            getIndex:     ()              => backend.getIndex(),
+            rebuildIndex: ()              => rebuildIndex(),
+            exportAll:    ()              => backend.exportAll(),
+        },
+
+        // ─── Utilities (portability) ──────────────────────────────
+
+        /** Serialize entire memory state to a single portable string. */
+        serialize: async () => serialize(await backend.exportAll()),
+
+        /** Serialize entire memory state to a ZIP archive (Uint8Array). */
+        toZip: async () => toZip(await backend.exportAll()),
 
         // ─── Internals (for advanced use / testing) ──────────────
         _backend: backend,
@@ -134,9 +153,9 @@ function _createBackend(storage, storagePath) {
 
     switch (storageType) {
         case 'indexeddb':
-            return _asyncBackend(() => import('./storage/indexeddb.js').then(m => new m.MemoryFileSystem()));
+            return _asyncBackend(() => import('./low-level/indexeddb.js').then(m => new m.MemoryFileSystem()));
         case 'filesystem':
-            return _asyncBackend(() => import('./storage/filesystem.js').then(m => new m.FileSystemStorage(storagePath)));
+            return _asyncBackend(() => import('./low-level/filesystem.js').then(m => new m.FileSystemStorage(storagePath)));
         case 'ram':
         default:
             return new InMemoryStorage();
@@ -169,15 +188,16 @@ function _asyncBackend(loader) {
 
 export { createOpenAIClient } from './llm/openai.js';
 export { createAnthropicClient } from './llm/anthropic.js';
-export { InMemoryStorage } from './storage/ram.js';
-export { BaseStorage } from './storage/BaseStorage.js';
+export { InMemoryStorage } from './low-level/ram.js';
+export { BaseStorage } from './low-level/BaseStorage.js';
 export { MemoryBulletIndex } from './bullets/bulletIndex.js';
-export { MemoryRetrieval } from './core/retrieval.js';
-export { MemoryExtractor } from './core/extractor.js';
-export { MemoryCompactor } from './core/compactor.js';
-export { createRetrievalExecutors, createExtractionExecutors } from './core/executors.js';
+export { MemoryRetrieval } from './high-level/retrieval.js';
+export { MemoryExtractor } from './high-level/extractor.js';
+export { MemoryCompactor } from './high-level/compactor.js';
+export { createRetrievalExecutors, createExtractionExecutors } from './high-level/executors.js';
+export { serialize, deserialize, toZip } from './utils/portability.js';
 export {
     extractSessionsFromOAFastchatExport,
     extractConversationFromOAFastchatExport,
     listOAFastchatSessions
-} from './imports/index.js';
+} from './utils/oaFastchat.js';

@@ -9,7 +9,8 @@
     "exports": {
         ".": "./src/index.js",
         "./bullets": "./src/bullets/index.js",
-        "./storage": "./src/storage/BaseStorage.js",
+        "./low-level": "./src/low-level/BaseStorage.js",
+        "./utils": "./src/utils/portability.js",
         "./imports": "./src/imports/index.js",
         "./llm": "./src/llm/openai.js",
         "./llm/openai": "./src/llm/openai.js",

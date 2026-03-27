@@ -5,7 +5,7 @@
  */
 import { BaseStorage } from './BaseStorage.js';
 import { countMemoryBullets, extractMemoryTitles } from '../bullets/index.js';
-import { buildMemoryIndex, createBootstrapRecords } from '../schema/memorySchema.js';
+import { buildMemoryIndex, createBootstrapRecords } from './schema.js';
 
 class InMemoryStorage extends BaseStorage {
     constructor() {

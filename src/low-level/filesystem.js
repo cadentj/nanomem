@@ -7,7 +7,7 @@ import { readdir, readFile, writeFile, unlink, mkdir, stat } from 'node:fs/promi
 import { join, dirname } from 'node:path';
 import { BaseStorage } from './BaseStorage.js';
 import { countMemoryBullets } from '../bullets/index.js';
-import { buildMemoryIndex, createBootstrapRecords } from '../schema/memorySchema.js';
+import { buildMemoryIndex, createBootstrapRecords } from './schema.js';
 
 class FileSystemStorage extends BaseStorage {
     constructor(rootDir) {
