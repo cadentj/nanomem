@@ -37,8 +37,9 @@ class MemoryFileSystem extends BaseStorage {
                 this.db = event.target.result;
                 try {
                     await this._bootstrap();
+                    await this._loadFacts();
                 } catch (err) {
-                    console.warn('[MemoryFS] Bootstrap error:', err);
+                    console.warn('[MemoryFS] Init error:', err);
                 }
                 resolve(this.db);
             };
@@ -60,15 +61,13 @@ class MemoryFileSystem extends BaseStorage {
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
-            for (const seed of seeds) {
-                store.put(seed);
-            }
+            for (const seed of seeds) store.put(seed);
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
         });
     }
 
-    async read(path) {
+    async _readRaw(path) {
         await this.init();
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(STORE_NAME, 'readonly');
@@ -78,18 +77,18 @@ class MemoryFileSystem extends BaseStorage {
         });
     }
 
-    async write(path, content) {
+    async _writeRaw(path, content, meta = {}) {
         await this.init();
         const now = Date.now();
         const existing = await this._get(path);
-        const nextContent = String(content || '');
+        const str = String(content || '');
 
         const record = {
             path,
-            content: nextContent,
-            l0: this._generateL0(nextContent),
-            itemCount: countMemoryBullets(nextContent),
-            titles: extractMemoryTitles(nextContent),
+            content: str,
+            l0: meta.l0 ?? this._generateL0(str),
+            itemCount: meta.itemCount ?? countMemoryBullets(str),
+            titles: meta.titles ?? extractMemoryTitles(str),
             parentPath: this._parentPath(path),
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
@@ -101,11 +100,10 @@ class MemoryFileSystem extends BaseStorage {
             request.onsuccess = () => resolve();
             request.onerror = () => reject(request.error);
         });
-        await this.rebuildIndex();
     }
 
     async delete(path) {
-        if (path.endsWith('_index.md')) return;
+        if (this._isInternalPath(path)) return;
         await this.init();
 
         await new Promise((resolve, reject) => {
@@ -131,7 +129,7 @@ class MemoryFileSystem extends BaseStorage {
         await this.init();
         const all = await this._getAll();
         const files = all
-            .filter(r => !r.path.endsWith('_index.md'))
+            .filter(r => !this._isInternalPath(r.path))
             .sort((a, b) => a.path.localeCompare(b.path));
         const indexContent = buildMemoryIndex(files);
         const existing = await this._get('_index.md');
@@ -143,6 +141,8 @@ class MemoryFileSystem extends BaseStorage {
                 path: '_index.md',
                 content: indexContent,
                 l0: 'Root index of memory filesystem',
+                itemCount: 0,
+                titles: [],
                 parentPath: '',
                 createdAt: existing?.createdAt ?? now,
                 updatedAt: now,
@@ -154,10 +154,12 @@ class MemoryFileSystem extends BaseStorage {
 
     async exportAll() {
         await this.init();
-        return this._getAll();
+        return (await this._getAll())
+            .filter(r => r.path !== '_facts.json')
+            .map(r => ({ ...r, content: this._resolveFacts(r.content) }));
     }
 
-    // ─── Internal IndexedDB helpers ─────────────────────────────
+    // ─── Internal IndexedDB helpers ──────────────────────────────
 
     async _get(path) {
         return new Promise((resolve, reject) => {

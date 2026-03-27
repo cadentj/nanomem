@@ -17,42 +17,42 @@ class InMemoryStorage extends BaseStorage {
     async init() {
         if (this._initialized) return;
         this._initialized = true;
-        if (this._files.size > 0) return;
 
-        const seeds = createBootstrapRecords(Date.now());
-        for (const seed of seeds) {
-            this._files.set(seed.path, seed);
+        if (this._files.size === 0) {
+            const seeds = createBootstrapRecords(Date.now());
+            for (const seed of seeds) {
+                this._files.set(seed.path, seed);
+            }
         }
+
+        await this._loadFacts();
     }
 
-    async read(path) {
+    async _readRaw(path) {
         await this.init();
-        const record = this._files.get(path);
-        return record?.content ?? null;
+        return this._files.get(path)?.content ?? null;
     }
 
-    async write(path, content) {
+    async _writeRaw(path, content, meta = {}) {
         await this.init();
         const now = Date.now();
         const existing = this._files.get(path);
-        const nextContent = String(content || '');
+        const str = String(content || '');
 
         this._files.set(path, {
             path,
-            content: nextContent,
-            l0: this._generateL0(nextContent),
-            itemCount: countMemoryBullets(nextContent),
-            titles: extractMemoryTitles(nextContent),
+            content: str,
+            l0: meta.l0 ?? this._generateL0(str),
+            itemCount: meta.itemCount ?? countMemoryBullets(str),
+            titles: meta.titles ?? extractMemoryTitles(str),
             parentPath: this._parentPath(path),
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
         });
-
-        await this.rebuildIndex();
     }
 
     async delete(path) {
-        if (path.endsWith('_index.md')) return;
+        if (this._isInternalPath(path)) return;
         await this.init();
         this._files.delete(path);
         await this.rebuildIndex();
@@ -66,7 +66,7 @@ class InMemoryStorage extends BaseStorage {
     async rebuildIndex() {
         await this.init();
         const files = [...this._files.values()]
-            .filter(r => !r.path.endsWith('_index.md'))
+            .filter(r => !this._isInternalPath(r.path))
             .sort((a, b) => a.path.localeCompare(b.path));
         const indexContent = buildMemoryIndex(files);
         const existing = this._files.get('_index.md');
@@ -76,6 +76,8 @@ class InMemoryStorage extends BaseStorage {
             path: '_index.md',
             content: indexContent,
             l0: 'Root index of memory filesystem',
+            itemCount: 0,
+            titles: [],
             parentPath: '',
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
@@ -84,12 +86,14 @@ class InMemoryStorage extends BaseStorage {
 
     async exportAll() {
         await this.init();
-        return [...this._files.values()];
+        return [...this._files.values()]
+            .filter(r => r.path !== '_facts.json')
+            .map(r => ({ ...r, content: this._resolveFacts(r.content) }));
     }
 
     async _listAllPaths() {
         await this.init();
-        return [...this._files.keys()];
+        return [...this._files.keys()].filter(p => !this._isInternalPath(p));
     }
 }
 

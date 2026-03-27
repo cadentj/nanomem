@@ -2,6 +2,7 @@
  * FileSystemStorage — Node.js filesystem storage backend.
  *
  * Stores memory files as .md files on disk. Uses fs/promises (Node 18+).
+ * _facts.json is stored alongside the .md files but excluded from indexes.
  */
 import { readdir, readFile, writeFile, unlink, mkdir, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
@@ -30,9 +31,11 @@ class FileSystemStorage extends BaseStorage {
                 await this._writeRaw(seed.path, seed.content);
             }
         }
+
+        await this._loadFacts();
     }
 
-    async read(path) {
+    async _readRaw(path) {
         await this.init();
         try {
             return await readFile(this._resolve(path), 'utf-8');
@@ -42,16 +45,14 @@ class FileSystemStorage extends BaseStorage {
         }
     }
 
-    async write(path, content) {
-        await this.init();
+    async _writeRaw(path, content, _meta = {}) {
         const fullPath = this._resolve(path);
         await mkdir(dirname(fullPath), { recursive: true });
         await writeFile(fullPath, String(content || ''), 'utf-8');
-        await this.rebuildIndex();
     }
 
     async delete(path) {
-        if (path.endsWith('_index.md')) return;
+        if (this._isInternalPath(path)) return;
         await this.init();
         try {
             await unlink(this._resolve(path));
@@ -74,11 +75,11 @@ class FileSystemStorage extends BaseStorage {
     async rebuildIndex() {
         await this.init();
         const allFiles = await this._walkFiles();
-        const files = allFiles.filter(f => !f.endsWith('_index.md')).sort();
+        const files = allFiles.filter(f => !this._isInternalPath(f)).sort();
         const fileRecords = [];
 
         for (const filePath of files) {
-            const content = await this.read(filePath);
+            const content = await this.read(filePath); // resolved
             let updatedAt = Date.now();
             try {
                 const s = await stat(this._resolve(filePath));
@@ -101,7 +102,8 @@ class FileSystemStorage extends BaseStorage {
         const records = [];
 
         for (const filePath of allFiles) {
-            const content = await this.read(filePath) || '';
+            if (filePath === '_facts.json') continue;
+            const content = await this.read(filePath) || ''; // resolved
             let updatedAt = Date.now();
             try {
                 const s = await stat(this._resolve(filePath));
@@ -119,22 +121,15 @@ class FileSystemStorage extends BaseStorage {
         return records;
     }
 
-    /** Efficient path listing — avoids reading file content. */
     async _listAllPaths() {
         await this.init();
-        return this._walkFiles();
+        return (await this._walkFiles()).filter(p => !this._isInternalPath(p));
     }
 
-    // ─── Internal helpers ───────────────────────────────────────
+    // ─── Internal helpers ────────────────────────────────────────
 
     _resolve(path) {
         return join(this._root, path);
-    }
-
-    async _writeRaw(path, content) {
-        const fullPath = this._resolve(path);
-        await mkdir(dirname(fullPath), { recursive: true });
-        await writeFile(fullPath, String(content || ''), 'utf-8');
     }
 
     async _ensureDir(dirPath) {
@@ -157,7 +152,7 @@ class FileSystemStorage extends BaseStorage {
             const relPath = dir ? `${dir}/${entry.name}` : entry.name;
             if (entry.isDirectory()) {
                 results.push(...await this._walkFiles(relPath));
-            } else if (entry.name.endsWith('.md')) {
+            } else if (entry.name.endsWith('.md') || entry.name === '_facts.json') {
                 results.push(relPath);
             }
         }

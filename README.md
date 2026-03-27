@@ -18,7 +18,7 @@ await memory.init();
 
 ## API
 
-Four methods:
+### High-level (LLM-driven)
 
 ```js
 // Save facts from a conversation
@@ -38,6 +38,38 @@ const result = await memory.retrieve('Tell me more about that', conversationText
 await memory.compact();
 ```
 
+### Low-level (direct storage)
+
+```js
+await memory.storage.read('health/allergies.md');
+await memory.storage.write('health/allergies.md', content);
+await memory.storage.delete('temporary/old.md');
+await memory.storage.exists('health/allergies.md');
+await memory.storage.search('peanut');
+await memory.storage.ls('health');
+await memory.storage.getIndex();
+await memory.storage.rebuildIndex();
+await memory.storage.exportAll();
+```
+
+### Utilities (portability)
+
+```js
+const str = await memory.serialize();  // single string, all files
+const zip = await memory.toZip();      // Uint8Array, valid ZIP
+```
+
+The standalone functions also work directly on an `exportAll()` result:
+
+```js
+import { serialize, deserialize, toZip } from '@openanonymity/memory/utils';
+
+const records = await memory.storage.exportAll();
+const str = serialize(records);          // → string
+const back = deserialize(str);           // → [{ path, content }, ...]
+const zip = toZip(records);              // → Uint8Array
+```
+
 ## Configuration
 
 ```js
@@ -52,7 +84,7 @@ const memory = createMemory({
     storage: 'ram',              // 'ram' | 'filesystem' | 'indexeddb' | custom backend object
     storagePath: './memory/',    // for 'filesystem' backend
 
-    // Callbacks (optional, configured once)
+    // Callbacks (optional)
     onProgress: ({ stage, message }) => {},   // retrieval progress
     onToolCall: (name, args, result) => {},   // extraction tool calls
     onModelText: (text) => {},                // intermediate model text
@@ -95,39 +127,56 @@ createMemory({
 | Config | Environment | Persistence |
 |--------|-------------|-------------|
 | `'ram'` (default) | Any | None — data lost on exit |
-| `'filesystem'` | Node.js | `.md` files on disk |
+| `'filesystem'` | Node.js | Files on disk |
 | `'indexeddb'` | Browser | IndexedDB |
 | Custom object | Any | You decide |
 
 ### Custom Backend
 
-Extend `BaseStorage` or implement the interface directly:
+Extend `BaseStorage` and implement the raw I/O layer:
 
 ```js
-import { BaseStorage } from '@openanonymity/memory/storage';
+import { BaseStorage } from '@openanonymity/memory/low-level';
 
 class MyStorage extends BaseStorage {
     async init() { }
-    async read(path) { }            // → string | null
-    async write(path, content) { }  // → void
-    async delete(path) { }          // → void
-    async exists(path) { }          // → boolean
-    async rebuildIndex() { }        // → void
-    async exportAll() { }           // → [{ path, content, updatedAt, itemCount, l0 }]
+    async _readRaw(path) { }              // → string | null
+    async _writeRaw(path, content, meta) { } // meta: { l0, itemCount, titles }
+    async delete(path) { }
+    async exists(path) { }               // → boolean
+    async rebuildIndex() { }
+    async exportAll() { }                // → [{ path, content, updatedAt, itemCount, l0 }]
 }
 
-// BaseStorage provides default implementations for search(), ls(), getIndex()
+// BaseStorage provides: read(), write(), search(), ls(), getIndex()
+// read/write handle fact interning and resolution transparently.
 ```
 
 ## How Memory is Stored
 
-Facts are stored as markdown bullets with metadata:
+### Fact store
 
-```markdown
-- Allergic to peanuts | topic=health | source=user_statement | confidence=high | updated_at=2025-03-12
+Every fact is assigned a unique integer ID and stored in `_facts.json`:
+
+```json
+{
+  "0": "Allergic to peanuts | topic=health | source=user_statement | confidence=high | updated_at=2025-03-12",
+  "1": "Lives in San Francisco | topic=location | tier=long_term | ..."
+}
 ```
 
-Each memory file has three sections (managed by compaction):
+`.md` files on disk reference facts by ID:
+
+```
+- {0}
+- {1}
+```
+
+`read()` resolves references transparently — callers always see full text. Writing the same fact with updated metadata reuses its existing ID (deduplication by fact text, ignoring metadata).
+
+### File structure
+
+Each memory file has three sections managed by compaction:
 
 ```markdown
 # Memory: Health
@@ -147,47 +196,14 @@ Each memory file has three sections (managed by compaction):
 
 There is no hardcoded folder structure. The LLM organizes files into folders naturally based on the topics discussed.
 
-## Low-Level Access
+## Source Layout
 
-Direct storage operations are available via `memory.storage`:
-
-```js
-await memory.storage.read('health/allergies.md');
-await memory.storage.write('health/allergies.md', content);
-await memory.storage.search('peanut');
-await memory.storage.ls('health');
-await memory.storage.delete('temporary/old.md');
-await memory.storage.exportAll();
 ```
-
-## Portability
-
-Export the entire memory state as a portable string or ZIP archive:
-
-```js
-import { deserialize } from '@openanonymity/memory';
-
-const str = await memory.serialize();   // single string, all files
-const zip = await memory.toZip();       // Uint8Array, valid ZIP
-
-// Reconstruct records from a serialized string
-const records = deserialize(str);       // [{ path, content }, ...]
+src/
+├── index.js          — createMemory(), public API
+├── high-level/       — LLM-driven: retrieval, extractor, compactor, executors, toolLoop
+├── low-level/        — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
+├── bullets/          — bullet format utilities: parser, normalize, scoring, compaction
+├── llm/              — LLM client wrappers: openai, anthropic
+└── utils/            — portability (serialize/toZip), oaFastchat adapter
 ```
-
-The standalone functions also work directly on an `exportAll()` result:
-
-```js
-import { serialize, toZip } from '@openanonymity/memory/utils';
-
-const records = await memory.storage.exportAll();
-const str = serialize(records);
-const zip = toZip(records);
-```
-
-## Architecture
-
-See [docs/memory-system.md](docs/memory-system.md) for implementation details including:
-
-- The two-index system (file index for the LLM, bullet index for scoring)
-- End-to-end extraction, retrieval, and compaction flows
-- Module relationships and recommended reading order
