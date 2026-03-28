@@ -5,8 +5,8 @@
  *
  * Returned object has three named groups:
  *
- *   High-level (LLM-driven):  init, retrieve, extract, compact
- *   Low-level  (storage ops): mem.storage.{ read, write, delete, exists,
+ *   Engine   (LLM-driven):  init, retrieve, extract, compact
+ *   Backends (storage ops): mem.storage.{ read, write, delete, exists,
  *                                           search, ls, getIndex,
  *                                           rebuildIndex, exportAll }
  *   Utilities  (portability): mem.serialize(), mem.toZip()
@@ -15,10 +15,10 @@
 import { createOpenAIClient } from './llm/openai.js';
 import { createAnthropicClient } from './llm/anthropic.js';
 import { MemoryBulletIndex } from './bullets/bulletIndex.js';
-import { MemoryRetrieval } from './high-level/retrieval.js';
-import { MemoryExtractor } from './high-level/extractor.js';
-import { MemoryCompactor } from './high-level/compactor.js';
-import { InMemoryStorage } from './low-level/ram.js';
+import { MemoryRetrieval } from './engine/retrieval.js';
+import { MemoryExtractor } from './engine/extractor.js';
+import { MemoryCompactor } from './engine/compactor.js';
+import { InMemoryStorage } from './backends/ram.js';
 import { serialize, toZip } from './utils/portability.js';
 
 /**
@@ -153,9 +153,9 @@ function _createBackend(storage, storagePath) {
 
     switch (storageType) {
         case 'indexeddb':
-            return _asyncBackend(() => import('./low-level/indexeddb.js').then(m => new m.MemoryFileSystem()));
+            return _asyncBackend(() => import('./backends/indexeddb.js').then(m => new m.MemoryFileSystem()));
         case 'filesystem':
-            return _asyncBackend(() => import('./low-level/filesystem.js').then(m => new m.FileSystemStorage(storagePath)));
+            return _asyncBackend(() => import('./backends/filesystem.js').then(m => new m.FileSystemStorage(storagePath)));
         case 'ram':
         default:
             return new InMemoryStorage();
@@ -188,13 +188,13 @@ function _asyncBackend(loader) {
 
 export { createOpenAIClient } from './llm/openai.js';
 export { createAnthropicClient } from './llm/anthropic.js';
-export { InMemoryStorage } from './low-level/ram.js';
-export { BaseStorage } from './low-level/BaseStorage.js';
+export { InMemoryStorage } from './backends/ram.js';
+export { BaseStorage } from './backends/BaseStorage.js';
 export { MemoryBulletIndex } from './bullets/bulletIndex.js';
-export { MemoryRetrieval } from './high-level/retrieval.js';
-export { MemoryExtractor } from './high-level/extractor.js';
-export { MemoryCompactor } from './high-level/compactor.js';
-export { createRetrievalExecutors, createExtractionExecutors } from './high-level/executors.js';
+export { MemoryRetrieval } from './engine/retrieval.js';
+export { MemoryExtractor } from './engine/extractor.js';
+export { MemoryCompactor } from './engine/compactor.js';
+export { createRetrievalExecutors, createExtractionExecutors } from './engine/executors.js';
 export { serialize, deserialize, toZip } from './utils/portability.js';
 export {
     extractSessionsFromOAFastchatExport,

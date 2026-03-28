@@ -136,7 +136,7 @@ createMemory({
 Extend `BaseStorage` and implement the raw I/O layer:
 
 ```js
-import { BaseStorage } from '@openanonymity/memory/low-level';
+import { BaseStorage } from '@openanonymity/memory/backends';
 
 class MyStorage extends BaseStorage {
     async init() { }
@@ -201,8 +201,8 @@ There is no hardcoded folder structure. The LLM organizes files into folders nat
 ```
 src/
 ├── index.js          — createMemory(), public API
-├── high-level/       — LLM-driven: retrieval, extractor, compactor, executors, toolLoop
-├── low-level/        — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
+├── engine/       — LLM-driven: retrieval, extractor, compactor, executors, toolLoop
+├── backends/        — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
 ├── bullets/          — bullet format utilities: parser, normalize, scoring, compaction
 ├── llm/              — LLM client wrappers: openai, anthropic
 └── utils/            — portability (serialize/toZip), oaFastchat adapter
