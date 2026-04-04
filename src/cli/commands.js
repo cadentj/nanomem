@@ -6,6 +6,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { serialize, toZip } from '../utils/portability.js';
 import { extractSessionsFromOAFastchatExport } from '../imports/oaFastchat.js';
+import { isChatGptExport, parseChatGptExport } from '../imports/chatgpt.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -27,8 +28,9 @@ function buildExportPath(format) {
  *
  * Auto-detects:
  *   1. OA Fastchat export  → { data: { chats: { sessions, messages } } }
- *   2. JSON messages array  → [{ role, content }]
- *   3. Plain text           → User: / Assistant: line format
+ *   2. ChatGPT export      → [{ mapping, current_node, title, ... }]
+ *   3. JSON messages array  → [{ role, content }]
+ *   4. Plain text           → User: / Assistant: line format
  */
 function parseConversations(input, flags) {
     const trimmed = input.trim();
@@ -47,6 +49,11 @@ function parseConversations(input, flags) {
                 title: s.session.title || s.session.id || 'untitled',
                 messages: s.conversation,
             }));
+        }
+
+        // ChatGPT export (conversations.json)
+        if (isChatGptExport(parsed)) {
+            return parseChatGptExport(parsed);
         }
 
         // Plain messages array

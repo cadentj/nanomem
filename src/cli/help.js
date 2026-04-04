@@ -29,7 +29,7 @@ Global flags:
   --model <model>         Model ID (env: LLM_MODEL)
   --provider <name>       Provider: openai | anthropic | tinfoil (env: LLM_PROVIDER)
   --base-url <url>        Custom API endpoint (env: LLM_BASE_URL)
-  --storage <type>        Storage backend: filesystem | ram (default: filesystem)
+  --storage <type>        Storage backend: filesystem | ram | indexeddb (default: filesystem)
   --path <dir>            Storage directory (default: ~/.memory)
   --json                  Print command results as JSON (for scripting)
   -h, --help              Show help
@@ -65,7 +65,7 @@ export const COMMAND_HELP = {
     delete: 'Usage: memory delete <path>\n\nDelete a file from storage.',
     search: 'Usage: memory search <query>\n\nSearch files by keyword.',
     export: 'Usage: memory export [--format txt|zip]\n\nExport all memory to a timestamped file in the current directory.\nDefault format is txt (line-delimited text). Use --format zip for a ZIP archive.',
-    import: 'Usage: memory import <file|->\n\nImport conversations and extract facts into memory.\n\nAuto-detects format:\n  - OA Fastchat export (JSON with data.chats.sessions)\n  - JSON messages array ([{role, content}, ...])\n  - Plain text (User:/Assistant: lines)\n\nFor multi-session exports, use --session-id or --session-title to filter.\nRequires an LLM API key.',
+    import: 'Usage: memory import <file|->\n\nImport conversations and extract facts into memory.\n\nAuto-detects format:\n  - ChatGPT export (conversations.json from "Export data")\n  - OA Fastchat export (JSON with data.chats.sessions)\n  - JSON messages array ([{role, content}, ...])\n  - Plain text (User:/Assistant: lines)\n\nFor multi-session exports, use --session-id or --session-title to filter.\nRequires an LLM API key.',
     clear: 'Usage: memory clear --confirm\n\nDelete all memory files. Requires --confirm to prevent accidental data loss.',
     status: 'Usage: memory status\n\nShow resolved config and storage statistics.',
 };

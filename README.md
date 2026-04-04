@@ -71,6 +71,7 @@ Storage:
 
 `memory import` auto-detects the input format:
 
+- **ChatGPT export** — `conversations.json` from ChatGPT's "Export data"
 - **OA Fastchat export** — JSON with `data.chats.sessions`
 - **JSON messages array** — `[{role, content}, ...]`
 - **Plain text** — `User:` / `Assistant:` lines
