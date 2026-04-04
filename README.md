@@ -4,7 +4,81 @@ LLM-driven memory for agentic systems. Plug it into any agent to give it persist
 
 The system uses an LLM to decide what to save (extraction), what to recall (retrieval), and how to consolidate (compaction). Memory is stored as human-readable markdown — not hidden vector state.
 
-## Quick Start
+## CLI
+
+```bash
+npm install -g @openanonymity/memory
+```
+
+Set an API key and start using it:
+
+```bash
+export OPENAI_API_KEY=sk-...
+
+memory init
+memory import conversation.json
+memory retrieve "what are my hobbies?"
+memory status
+```
+
+### Commands
+
+```
+Info:
+  status                                  Show config and storage stats
+
+Engine:
+  init                                    Initialize storage (seeds default files)
+  import <file|->                         Import conversations and extract facts
+  retrieve <query> [--context <file>]     Retrieve relevant context for a query
+  compact                                 Deduplicate and archive stale facts
+
+Storage:
+  ls [path]                               List files and directories
+  read <path>                             Read a file
+  write <path> --content <text>           Write content to a file (or pipe stdin)
+  delete <path>                           Delete a file
+  search <query>                          Search files by keyword
+  export [--format json|zip]              Export all memory
+  clear --confirm                         Delete all memory files
+```
+
+### Global Flags
+
+```
+--api-key <key>         LLM API key (env: OPENAI_API_KEY, etc.)
+--model <model>         Model ID (env: LLM_MODEL)
+--provider <name>       Provider: openai | anthropic | tinfoil (env: LLM_PROVIDER)
+--base-url <url>        Custom API endpoint (env: LLM_BASE_URL)
+--storage <type>        Storage backend: filesystem | ram (default: filesystem)
+--path <dir>            Storage directory (default: ~/.memory)
+--json                  Force JSON output
+```
+
+### Import Formats
+
+`memory import` auto-detects the input format:
+
+- **OA Fastchat export** — JSON with `data.chats.sessions`
+- **JSON messages array** — `[{role, content}, ...]`
+- **Plain text** — `User:` / `Assistant:` lines
+- Pipe from stdin: `echo '[{"role":"user","content":"I like cats"}]' | memory import -`
+
+### Environment Variables
+
+```
+OPENAI_API_KEY          OpenAI API key
+ANTHROPIC_API_KEY       Anthropic API key
+TINFOIL_API_KEY         Tinfoil API key
+LLM_API_KEY             Override API key for any provider
+LLM_BASE_URL            Override base URL
+LLM_MODEL               Override model
+LLM_PROVIDER            Override provider detection
+```
+
+## Library API
+
+### Quick Start
 
 ```js
 import { createMemory } from '@openanonymity/memory';
@@ -15,8 +89,6 @@ const memory = createMemory({
 
 await memory.init();
 ```
-
-## API
 
 ### High-level (LLM-driven)
 
@@ -50,6 +122,7 @@ await memory.storage.ls('health');
 await memory.storage.getIndex();
 await memory.storage.rebuildIndex();
 await memory.storage.exportAll();
+await memory.storage.clear();
 ```
 
 ### Utilities (portability)
@@ -133,7 +206,7 @@ createMemory({
 
 ### Custom Backend
 
-Extend `BaseStorage` and implement the raw I/O layer:
+Extend `BaseStorage` and implement the required methods:
 
 ```js
 import { BaseStorage } from '@openanonymity/memory/backends';
@@ -146,52 +219,30 @@ class MyStorage extends BaseStorage {
     async exists(path) { }               // → boolean
     async rebuildIndex() { }
     async exportAll() { }                // → [{ path, content, updatedAt, itemCount, l0 }]
+    async clear() { }                    // remove all data, re-init to ready state
 }
 
 // BaseStorage provides: read(), write(), search(), ls(), getIndex()
-// read/write handle fact interning and resolution transparently.
 ```
 
 ## How Memory is Stored
 
-### Fact store
-
-Every fact is assigned a unique integer ID and stored in `_facts.json`:
-
-```json
-{
-  "0": "Allergic to peanuts | topic=health | source=user_statement | confidence=high | updated_at=2025-03-12",
-  "1": "Lives in San Francisco | topic=location | tier=long_term | ..."
-}
-```
-
-`.md` files on disk reference facts by ID:
-
-```
-- {0}
-- {1}
-```
-
-`read()` resolves references transparently — callers always see full text. Writing the same fact with updated metadata reuses its existing ID (deduplication by fact text, ignoring metadata).
-
-### File structure
-
-Each memory file has three sections managed by compaction:
+Memory files are plain markdown with structured bullet metadata:
 
 ```markdown
 # Memory: Health
 
 ## Working
 ### Current context
-- Currently adjusting medication | tier=working | source=user_statement | ...
+- Currently adjusting medication | tier=working | source=user_statement | confidence=high | updated_at=2025-03-12
 
 ## Long-Term
 ### Stable facts
-- Allergic to peanuts | tier=long_term | source=user_statement | ...
+- Allergic to peanuts | tier=long_term | source=user_statement | confidence=high | updated_at=2025-03-12
 
 ## History
 ### No longer current
-- Was on old medication | tier=history | status=superseded | ...
+- Was on old medication | tier=history | status=superseded | updated_at=2025-03-12
 ```
 
 There is no hardcoded folder structure. The LLM organizes files into folders naturally based on the topics discussed.
@@ -201,9 +252,12 @@ There is no hardcoded folder structure. The LLM organizes files into folders nat
 ```
 src/
 ├── index.js          — createMemory(), public API
-├── engine/       — LLM-driven: retrieval, extractor, compactor, executors, toolLoop
-├── backends/        — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
+├── cli.js            — CLI entry point
+├── cli/              — CLI: config, commands, help, output formatting
+├── engine/           — LLM-driven: retrieval, extractor, compactor, executors, toolLoop
+├── backends/         — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
 ├── bullets/          — bullet format utilities: parser, normalize, scoring, compaction
 ├── llm/              — LLM client wrappers: openai, anthropic
-└── utils/            — portability (serialize/toZip), oaFastchat adapter
+├── imports/          — chat format parsers: oaFastchat
+└── utils/            — portability (serialize/toZip)
 ```
