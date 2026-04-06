@@ -1,11 +1,11 @@
 /**
  * @openanonymity/memory — LLM-driven personal memory.
  *
- * createMemory(config) is the main entry point.
+ * createMemoryBank(config) is the main entry point.
  *
  * Returned object has three named groups:
  *
- *   Engine   (LLM-driven):  init, retrieve, extract, compact
+ *   Engine   (LLM-driven):  init, retrieve, ingest, compact
  *   Backends (storage ops): mem.storage.{ read, write, delete, exists,
  *                                           search, ls, getIndex,
  *                                           rebuildIndex, exportAll }
@@ -15,8 +15,8 @@
 import { createOpenAIClient } from './llm/openai.js';
 import { createAnthropicClient } from './llm/anthropic.js';
 import { MemoryBulletIndex } from './bullets/bulletIndex.js';
-import { MemoryRetrieval } from './engine/retrieval.js';
-import { MemoryExtractor } from './engine/extractor.js';
+import { MemoryRetriever } from './engine/retriever.js';
+import { MemoryIngester } from './engine/ingester.js';
 import { MemoryCompactor } from './engine/compactor.js';
 import { InMemoryStorage } from './backends/ram.js';
 import { serialize, toZip } from './utils/portability.js';
@@ -34,18 +34,18 @@ import { serialize, toZip } from './utils/portability.js';
  * @param {Function} [config.onToolCall] — extraction tool call callback(name, args, result)
  * @param {Function} [config.onModelText] — intermediate model text callback(text)
  */
-export function createMemory(config = {}) {
+export function createMemoryBank(config = {}) {
     const llmClient = config.llmClient || _createLlmClient(config.llm || {});
     const model = config.model || config.llm?.model || 'gpt-4o';
     const backend = _createBackend(config.storage, config.storagePath);
     const bulletIndex = new MemoryBulletIndex(backend);
 
-    const retrieval = new MemoryRetrieval({
+    const retrieval = new MemoryRetriever({
         backend, bulletIndex, llmClient, model,
         onProgress: config.onProgress,
         onModelText: config.onModelText,
     });
-    const extractor = new MemoryExtractor({
+    const ingester = new MemoryIngester({
         backend, bulletIndex, llmClient, model,
         onToolCall: config.onToolCall,
     });
@@ -82,11 +82,13 @@ export function createMemory(config = {}) {
         retrieve: (query, conversationText) => retrieval.retrieveForQuery(query, conversationText),
 
         /**
-         * Extract facts from a conversation into memory.
+         * Ingest facts from a conversation into memory.
          * @param {Array<{role: string, content: string}>} messages
+         * @param {object} [options]
+         * @param {string} [options.updatedAt] — ISO date to use for bullet timestamps (defaults to today)
          * @returns {Promise<{status: string, writeCalls: number}>}
          */
-        extract: (messages) => extractor.extract(messages),
+        ingest: (messages, options) => ingester.ingest(messages, options),
 
         /** Compact all memory files (dedup, archive stale facts). */
         compact: () => compactor.compactAll(),
@@ -125,7 +127,7 @@ export function createMemory(config = {}) {
 function _createLlmClient(llmConfig) {
     const { apiKey, baseUrl, headers, provider } = llmConfig;
     if (!apiKey) {
-        throw new Error('createMemory: config.llm.apiKey is required (or provide config.llmClient)');
+        throw new Error('createMemoryBank: config.llm.apiKey is required (or provide config.llmClient)');
     }
 
     const detectedProvider = provider || _detectProvider(baseUrl);
@@ -154,7 +156,7 @@ function _createBackend(storage, storagePath) {
 
     switch (storageType) {
         case 'indexeddb':
-            return _asyncBackend(() => import('./backends/indexeddb.js').then(m => new m.MemoryFileSystem()));
+            return _asyncBackend(() => import('./backends/indexeddb.js').then(m => new m.IndexedDBStorage()));
         case 'filesystem':
             return _asyncBackend(() => import('./backends/filesystem.js').then(m => new m.FileSystemStorage(storagePath)));
         case 'ram':
@@ -192,8 +194,8 @@ export { createAnthropicClient } from './llm/anthropic.js';
 export { InMemoryStorage } from './backends/ram.js';
 export { BaseStorage } from './backends/BaseStorage.js';
 export { MemoryBulletIndex } from './bullets/bulletIndex.js';
-export { MemoryRetrieval } from './engine/retrieval.js';
-export { MemoryExtractor } from './engine/extractor.js';
+export { MemoryRetriever } from './engine/retriever.js';
+export { MemoryIngester } from './engine/ingester.js';
 export { MemoryCompactor } from './engine/compactor.js';
 export { createRetrievalExecutors, createExtractionExecutors } from './engine/executors.js';
 export { serialize, deserialize, toZip } from './utils/portability.js';

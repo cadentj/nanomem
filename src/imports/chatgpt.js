@@ -6,6 +6,7 @@
  *
  * Based on the OA Fastchat chatgptImporter.
  */
+import { safeDateIso } from '../bullets/normalize.js';
 
 const SKIP_CONTENT_TYPES = new Set([
     'user_editable_context',
@@ -62,7 +63,10 @@ function normalizeChatGptConversation(conversation) {
     }
 
     const title = (conversation?.title || '').trim() || null;
-    return { title, messages };
+    const updatedAt = conversation?.update_time
+        ? safeDateIso(conversation.update_time * 1000)
+        : null;
+    return { title, messages, updatedAt };
 }
 
 /**

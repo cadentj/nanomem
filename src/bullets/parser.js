@@ -17,7 +17,7 @@ import {
 const BULLET_REGEX = /^\s*-\s+(.*)$/;
 const HEADING_REGEX = /^\s{0,3}#{1,6}\s+(.*)$/;
 
-export function parseMemoryBullets(content) {
+export function parseBullets(content) {
     const lines = String(content || '').split('\n');
     const bullets = [];
     let currentHeading = 'General';
@@ -93,11 +93,11 @@ export function parseMemoryBullets(content) {
     return bullets;
 }
 
-export function countMemoryBullets(content) {
-    return parseMemoryBullets(content).length;
+export function countBullets(content) {
+    return parseBullets(content).length;
 }
 
-export function extractMemoryTitles(content) {
+export function extractTitles(content) {
     const lines = String(content || '').split('\n');
     const titles = [];
 
@@ -114,7 +114,7 @@ export function extractMemoryTitles(content) {
     return titles;
 }
 
-export function renderMemoryBullet(bullet) {
+export function renderBullet(bullet) {
     const clean = ensureBulletMetadata(bullet);
     const metadata = [
         `topic=${clean.topic}`,
@@ -156,11 +156,11 @@ function renderSection(lines, title, subsectionTitle, bullets, forceHistory = fa
         const nextBullet = forceHistory
             ? { ...bullet, tier: 'history', status: bullet.status === 'active' ? 'superseded' : bullet.status, section: 'history' }
             : bullet;
-        lines.push(renderMemoryBullet(nextBullet));
+        lines.push(renderBullet(nextBullet));
     }
 }
 
-export function renderCompactedMemoryDocument(working, longTerm, history, options = {}) {
+export function renderCompactedDocument(working, longTerm, history, options = {}) {
     const lines = [];
     const docTopic = normalizeTopic(options.titleTopic || inferDocumentTopic([...working, ...longTerm, ...history], 'general'));
     lines.push(`# Memory: ${topicHeading(docTopic)}`);

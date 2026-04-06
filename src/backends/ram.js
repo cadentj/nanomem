@@ -4,7 +4,7 @@
  * Data is lost when the process exits.
  */
 import { BaseStorage } from './BaseStorage.js';
-import { countMemoryBullets, extractMemoryTitles } from '../bullets/index.js';
+import { countBullets, extractTitles } from '../bullets/index.js';
 import { buildMemoryIndex, createBootstrapRecords } from './schema.js';
 
 class InMemoryStorage extends BaseStorage {
@@ -41,9 +41,9 @@ class InMemoryStorage extends BaseStorage {
         this._files.set(path, {
             path,
             content: str,
-            l0: meta.l0 ?? this._generateL0(str),
-            itemCount: meta.itemCount ?? countMemoryBullets(str),
-            titles: meta.titles ?? extractMemoryTitles(str),
+            oneLiner: meta.oneLiner ?? this._generateOneLiner(str),
+            itemCount: meta.itemCount ?? countBullets(str),
+            titles: meta.titles ?? extractTitles(str),
             parentPath: this._parentPath(path),
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
@@ -80,7 +80,7 @@ class InMemoryStorage extends BaseStorage {
         this._files.set('_index.md', {
             path: '_index.md',
             content: indexContent,
-            l0: 'Root index of memory filesystem',
+            oneLiner: 'Root index of memory filesystem',
             itemCount: 0,
             titles: [],
             parentPath: '',

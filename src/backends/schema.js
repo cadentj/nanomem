@@ -11,7 +11,7 @@ export function createBootstrapRecords(now = Date.now()) {
         {
             path: '_index.md',
             content: buildBootstrapIndex(),
-            l0: 'Root index of memory filesystem',
+            oneLiner: 'Root index of memory filesystem',
             parentPath: '',
             createdAt: now,
             updatedAt: now
@@ -31,7 +31,7 @@ export function buildMemoryIndex(files) {
             const meta = count > 0
                 ? `(${count} item${count !== 1 ? 's' : ''}, updated ${updated})`
                 : updated ? `(updated ${updated})` : '';
-            lines.push(`- ${file.path} ${meta} — ${file.l0}`);
+            lines.push(`- ${file.path} ${meta} — ${file.oneLiner}`);
         }
     } else {
         lines.push('_No files yet._');

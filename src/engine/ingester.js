@@ -1,5 +1,5 @@
 /**
- * MemoryExtractor — Write path for agentic memory.
+ * MemoryIngester — Write path for agentic memory.
  *
  * Takes a conversation (array of messages) and uses tool-calling via the
  * agentic loop to decide whether to create/append/update memory files.
@@ -10,8 +10,8 @@ import {
     compactBullets,
     ensureBulletMetadata,
     inferTopicFromPath,
-    parseMemoryBullets,
-    renderCompactedMemoryDocument,
+    parseBullets,
+    renderCompactedDocument,
     todayIsoDate
 } from '../bullets/index.js';
 
@@ -112,7 +112,7 @@ const EXTRACTION_SYSTEM_PROMPT = `You are a memory manager. After reading a conv
 
 CRITICAL: Only save facts the user explicitly stated. Do NOT infer, extrapolate, or fabricate information.
 
-Save information that is likely to help in a future conversation. Be highly selective — only save durable facts, not transient conversation details.
+Save information that is likely to help in a future conversation. Be selective — only save durable facts, not transient conversation details.
 
 Do NOT save:
 - Anything the user did not explicitly say (no inferences, no extrapolations, no "likely" facts)
@@ -154,7 +154,7 @@ Rules:
 - Content should be raw facts only — no filler commentary.`;
 
 
-class MemoryExtractor {
+class MemoryIngester {
     /**
      * @param {object} deps
      * @param {Function} [deps.onToolCall] — callback(name, args, result)
@@ -168,12 +168,15 @@ class MemoryExtractor {
     }
 
     /**
-     * Extract memory from a conversation.
+     * Ingest memory from a conversation.
      *
      * @param {Array<{role: string, content: string}>} messages
+     * @param {object} [options]
+     * @param {string} [options.updatedAt] — ISO date for bullet timestamps (defaults to today)
      * @returns {Promise<{status: 'processed'|'skipped'|'error', writeCalls: number, error?: string}>}
      */
-    async extract(messages) {
+    async ingest(messages, options = {}) {
+        const updatedAt = options.updatedAt || todayIsoDate();
         const onToolCall = this._onToolCall;
         if (!messages || messages.length < 2) return { status: 'skipped', writeCalls: 0 };
 
@@ -186,8 +189,8 @@ class MemoryExtractor {
         const systemPrompt = EXTRACTION_SYSTEM_PROMPT
             .replace('{INDEX}', index);
         const toolExecutors = createExtractionExecutors(this._backend, {
-            normalizeContent: (content, path) => this._normalizeGeneratedContent(content, path),
-            mergeWithExisting: (existing, incoming, path) => this._mergeWithExisting(existing, incoming, path),
+            normalizeContent: (content, path) => this._normalizeGeneratedContent(content, path, updatedAt),
+            mergeWithExisting: (existing, incoming, path) => this._mergeWithExisting(existing, incoming, path, updatedAt),
             refreshIndex: (path) => this._bulletIndex.refreshPath(path)
         });
 
@@ -202,7 +205,7 @@ class MemoryExtractor {
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: `Conversation:\n\`\`\`\n${conversationText}\n\`\`\`` }
                 ],
-                maxIterations: 6,
+                maxIterations: 12,
                 maxOutputTokens: 500,
                 temperature: 0,
                 onToolCall: (name, args, result) => {
@@ -231,30 +234,29 @@ class MemoryExtractor {
         return text.trim();
     }
 
-    _normalizeGeneratedContent(content, path) {
-        const incomingBullets = parseMemoryBullets(content);
+    _normalizeGeneratedContent(content, path, updatedAt) {
+        const incomingBullets = parseBullets(content);
         if (incomingBullets.length === 0) {
             return content;
         }
 
         const defaultTopic = inferTopicFromPath(path);
         const normalized = incomingBullets.map((bullet) =>
-            ensureBulletMetadata(bullet, { defaultTopic, updatedAt: todayIsoDate() })
+            ensureBulletMetadata({ ...bullet, updatedAt: null }, { defaultTopic, updatedAt })
         );
         const compacted = compactBullets(normalized, { defaultTopic, maxActivePerTopic: 1000 });
-        return renderCompactedMemoryDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
+        return renderCompactedDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
     }
 
-    _mergeWithExisting(existing, incoming, path) {
+    _mergeWithExisting(existing, incoming, path, updatedAt) {
         const existingText = String(existing || '');
         const incomingText = String(incoming || '');
         const defaultTopic = inferTopicFromPath(path);
-        const today = todayIsoDate();
 
-        const existingBullets = parseMemoryBullets(existingText)
-            .map((bullet) => ensureBulletMetadata(bullet, { defaultTopic, updatedAt: today }));
-        const incomingBullets = parseMemoryBullets(incomingText)
-            .map((bullet) => ensureBulletMetadata(bullet, { defaultTopic, updatedAt: today }));
+        const existingBullets = parseBullets(existingText)
+            .map((bullet) => ensureBulletMetadata(bullet, { defaultTopic }));
+        const incomingBullets = parseBullets(incomingText)
+            .map((bullet) => ensureBulletMetadata({ ...bullet, updatedAt: null }, { defaultTopic, updatedAt }));
 
         if (incomingBullets.length === 0) {
             return existingText
@@ -264,13 +266,13 @@ class MemoryExtractor {
 
         if (existingBullets.length === 0) {
             const compacted = compactBullets(incomingBullets, { defaultTopic, maxActivePerTopic: 1000 });
-            return renderCompactedMemoryDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
+            return renderCompactedDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
         }
 
         const merged = [...existingBullets, ...incomingBullets];
         const compacted = compactBullets(merged, { defaultTopic, maxActivePerTopic: 1000 });
-        return renderCompactedMemoryDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
+        return renderCompactedDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
     }
 }
 
-export { MemoryExtractor };
+export { MemoryIngester };

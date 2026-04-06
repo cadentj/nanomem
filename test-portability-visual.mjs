@@ -7,12 +7,12 @@
  *   node test-portability-visual.mjs
  */
 
-import { createMemory } from './src/index.js';
+import { createMemoryBank } from './src/index.js';
 import { deserialize } from './src/utils/portability.js';
 
 // ─── Seed memory with some hardcoded records ─────────────────
 
-const memory = createMemory({ storage: 'ram', llmClient: { createChatCompletion: () => {} } });
+const memory = createMemoryBank({ storage: 'ram', llmClient: { createChatCompletion: () => {} } });
 await memory.init();
 
 await memory.storage.write('profile/identity.md', [

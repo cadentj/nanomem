@@ -1,4 +1,4 @@
-import { parseMemoryBullets, todayIsoDate } from './index.js';
+import { parseBullets, todayIsoDate } from './index.js';
 
 class MemoryBulletIndex {
     constructor(backend) {
@@ -41,7 +41,7 @@ class MemoryBulletIndex {
     }
 
     _parseForIndex(path, content) {
-        const parsed = parseMemoryBullets(content || '');
+        const parsed = parseBullets(content || '');
         if (parsed.length > 0) return parsed;
 
         // Lightweight fallback for legacy files: use plain lines as bullets.

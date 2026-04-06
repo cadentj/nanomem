@@ -1,17 +1,17 @@
 /**
- * MemoryFileSystem — Virtual markdown filesystem backed by IndexedDB.
+ * IndexedDBStorage — Virtual markdown filesystem backed by IndexedDB.
  *
  * Browser-only. Stores memory files in a separate 'oa-memory-fs' database.
  */
 import { BaseStorage } from './BaseStorage.js';
-import { countMemoryBullets, extractMemoryTitles } from '../bullets/index.js';
+import { countBullets, extractTitles } from '../bullets/index.js';
 import { buildMemoryIndex, createBootstrapRecords } from './schema.js';
 
 const DB_NAME = 'oa-memory-fs';
 const DB_VERSION = 1;
 const STORE_NAME = 'memoryFiles';
 
-class MemoryFileSystem extends BaseStorage {
+class IndexedDBStorage extends BaseStorage {
     constructor() {
         super();
         this.db = null;
@@ -36,7 +36,7 @@ class MemoryFileSystem extends BaseStorage {
             request.onsuccess = async (event) => {
                 this.db = event.target.result;
                 try { await this._bootstrap(); } catch (err) {
-                    console.warn('[MemoryFS] Init error:', err);
+                    console.warn('[IndexedDBStorage] Init error:', err);
                 }
                 resolve(this.db);
             };
@@ -83,9 +83,9 @@ class MemoryFileSystem extends BaseStorage {
         const record = {
             path,
             content: str,
-            l0: meta.l0 ?? this._generateL0(str),
-            itemCount: meta.itemCount ?? countMemoryBullets(str),
-            titles: meta.titles ?? extractMemoryTitles(str),
+            oneLiner: meta.oneLiner ?? this._generateOneLiner(str),
+            itemCount: meta.itemCount ?? countBullets(str),
+            titles: meta.titles ?? extractTitles(str),
             parentPath: this._parentPath(path),
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
@@ -149,7 +149,7 @@ class MemoryFileSystem extends BaseStorage {
             tx.objectStore(STORE_NAME).put({
                 path: '_index.md',
                 content: indexContent,
-                l0: 'Root index of memory filesystem',
+                oneLiner: 'Root index of memory filesystem',
                 itemCount: 0,
                 titles: [],
                 parentPath: '',
@@ -187,4 +187,4 @@ class MemoryFileSystem extends BaseStorage {
     }
 }
 
-export { MemoryFileSystem };
+export { IndexedDBStorage };

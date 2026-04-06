@@ -9,7 +9,7 @@ import {
     inferStatusFromSection,
 } from './normalize.js';
 
-export function scoreMemoryBullet(bullet, queryTerms = []) {
+export function scoreBullet(bullet, queryTerms = []) {
     const text = String(bullet?.text || '').toLowerCase();
     const topic = String(bullet?.topic || '').toLowerCase();
     const tier = normalizeTier(bullet?.tier || bullet?.section || 'long_term');

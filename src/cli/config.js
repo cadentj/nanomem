@@ -1,5 +1,5 @@
 /**
- * CLI config resolution — env vars + flags → createMemory config.
+ * CLI config resolution — env vars + flags → createMemoryBank config.
  *
  * Priority (highest wins):
  *   CLI flags  >  LLM_* env vars  >  provider-specific env vars  >  preset defaults
@@ -7,7 +7,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createMemory } from '../index.js';
+import { createMemoryBank } from '../index.js';
 
 // ─── Provider presets ────────────────────────────────────────────
 
@@ -75,11 +75,11 @@ export function createMemoryFromConfig(config, command, { onToolCall } = {}) {
         };
         if (onToolCall) opts.onToolCall = onToolCall;
     } else {
-        // Stub client so createMemory() doesn't throw on missing apiKey
+        // Stub client so createMemoryBank() doesn't throw on missing apiKey
         opts.llmClient = {
             createChatCompletion() { throw new Error('This command requires an API key.'); },
         };
     }
 
-    return createMemory(opts);
+    return createMemoryBank(opts);
 }

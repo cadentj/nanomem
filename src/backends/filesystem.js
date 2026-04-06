@@ -6,7 +6,7 @@
 import { readdir, readFile, writeFile, unlink, mkdir, rm, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { BaseStorage } from './BaseStorage.js';
-import { countMemoryBullets } from '../bullets/index.js';
+import { countBullets } from '../bullets/index.js';
 import { buildMemoryIndex, createBootstrapRecords } from './schema.js';
 
 class FileSystemStorage extends BaseStorage {
@@ -91,8 +91,8 @@ class FileSystemStorage extends BaseStorage {
             } catch { /* skip */ }
             fileRecords.push({
                 path: filePath,
-                itemCount: countMemoryBullets(content || ''),
-                l0: this._generateL0(content || ''),
+                itemCount: countBullets(content || ''),
+                oneLiner: this._generateOneLiner(content || ''),
                 updatedAt,
             });
         }
@@ -115,8 +115,8 @@ class FileSystemStorage extends BaseStorage {
             records.push({
                 path: filePath,
                 content,
-                l0: this._generateL0(content),
-                itemCount: countMemoryBullets(content),
+                oneLiner: this._generateOneLiner(content),
+                itemCount: countBullets(content),
                 updatedAt,
             });
         }

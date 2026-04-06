@@ -94,9 +94,9 @@ LLM_PROVIDER            Override provider detection
 ### Quick Start
 
 ```js
-import { createMemory } from '@openanonymity/memory';
+import { createMemoryBank } from '@openanonymity/memory';
 
-const memory = createMemory({
+const memory = createMemoryBank({
     llm: { apiKey: 'sk-...', model: 'gpt-4o' },
 });
 
@@ -107,7 +107,7 @@ await memory.init();
 
 ```js
 // Save facts from a conversation
-await memory.extract([
+await memory.ingest([
     { role: 'user', content: 'I just moved to San Francisco' },
     { role: 'assistant', content: 'Welcome to SF!' },
 ]);
@@ -159,7 +159,7 @@ const zip = toZip(records);              // → Uint8Array
 ## Configuration
 
 ```js
-const memory = createMemory({
+const memory = createMemoryBank({
     // LLM provider (required — pick one)
     llm: { apiKey, baseUrl, model, provider, headers },
     // or bring your own client:
@@ -182,7 +182,7 @@ const memory = createMemory({
 ### OpenAI / Tinfoil / OpenRouter
 
 ```js
-createMemory({
+createMemoryBank({
     llm: { apiKey: 'sk-...', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
 });
 ```
@@ -190,7 +190,7 @@ createMemory({
 ### Anthropic
 
 ```js
-createMemory({
+createMemoryBank({
     llm: { apiKey: 'sk-ant-...', provider: 'anthropic', model: 'claude-sonnet-4-6' },
 });
 ```
@@ -198,7 +198,7 @@ createMemory({
 ### Custom LLM Client
 
 ```js
-createMemory({
+createMemoryBank({
     llmClient: {
         async createChatCompletion({ model, messages, tools, max_tokens, temperature }) {
             // → { content: string, tool_calls: [{ id, function: { name, arguments } }] }
@@ -227,11 +227,11 @@ import { BaseStorage } from '@openanonymity/memory/backends';
 class MyStorage extends BaseStorage {
     async init() { }
     async _readRaw(path) { }              // → string | null
-    async _writeRaw(path, content, meta) { } // meta: { l0, itemCount, titles }
+    async _writeRaw(path, content, meta) { } // meta: { oneLiner, itemCount, titles }
     async delete(path) { }
     async exists(path) { }               // → boolean
     async rebuildIndex() { }
-    async exportAll() { }                // → [{ path, content, updatedAt, itemCount, l0 }]
+    async exportAll() { }                // → [{ path, content, updatedAt, itemCount, oneLiner }]
     async clear() { }                    // remove all data, re-init to ready state
 }
 
@@ -264,10 +264,10 @@ There is no hardcoded folder structure. The LLM organizes files into folders nat
 
 ```
 src/
-├── index.js          — createMemory(), public API
+├── index.js          — createMemoryBank(), public API
 ├── cli.js            — CLI entry point
 ├── cli/              — CLI: config, commands, help, output formatting
-├── engine/           — LLM-driven: retrieval, extractor, compactor, executors, toolLoop
+├── engine/           — LLM-driven: retriever, ingester, compactor, executors, toolLoop
 ├── backends/         — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
 ├── bullets/          — bullet format utilities: parser, normalize, scoring, compaction
 ├── llm/              — LLM client wrappers: openai, anthropic

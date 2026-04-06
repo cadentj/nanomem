@@ -13,7 +13,8 @@
  *   ANTHROPIC_API_KEY=sk-ant-... LLM_PROVIDER=anthropic LLM_MODEL=claude-sonnet-4-6 node test-smoke.mjs
  */
 
-import { createMemory } from './src/index.js';
+import { createMemoryBank } from './src/index.js';
+import { safeDateIso } from './src/bullets/normalize.js';
 import { readFile } from 'node:fs/promises';
 import { extractSessionsFromOAFastchatExport } from './src/imports/oaFastchat.js';
 
@@ -80,7 +81,7 @@ console.log(`Using model=${model}, baseUrl=${baseUrl}, storage=${storageFlag}${s
 
 // ─── Create memory ───────────────────────────────────────────
 
-const memory = createMemory({
+const memory = createMemoryBank({
     llm: { apiKey, baseUrl, model, provider },
     storage: storageFlag,
     storagePath,
@@ -114,7 +115,8 @@ if (conversationJsonPath) {
 let totalWriteCalls = 0;
 for (const entry of conversations) {
     console.log(`\nSession: "${entry.session.title || entry.session.id || 'untitled'}" (${entry.conversation.length} messages)`);
-    const extractResult = await memory.extract(entry.conversation);
+    const sessionDate = safeDateIso(entry.session?.updatedAt);
+    const extractResult = await memory.ingest(entry.conversation, { updatedAt: sessionDate });
     totalWriteCalls += extractResult.writeCalls;
     console.log(`  Extract result: status=${extractResult.status}, writeCalls=${extractResult.writeCalls}${extractResult.error ? `, error=${extractResult.error}` : ''}`);
 }

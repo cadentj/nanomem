@@ -5,6 +5,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { serialize, toZip } from '../utils/portability.js';
+import { safeDateIso } from '../bullets/normalize.js';
 import { extractSessionsFromOAFastchatExport } from '../imports/oaFastchat.js';
 import { isChatGptExport, parseChatGptExport } from '../imports/chatgpt.js';
 
@@ -48,6 +49,7 @@ function parseConversations(input, flags) {
             return sessions.map(s => ({
                 title: s.session.title || s.session.id || 'untitled',
                 messages: s.conversation,
+                updatedAt: safeDateIso(s.session.updatedAt),
             }));
         }
 
@@ -141,7 +143,7 @@ export async function importCmd(positionals, flags, mem, config, { showProgress 
             process.stderr.write(`\nImporting "${label}"\n`);
         }
 
-        const result = await mem.extract(conv.messages);
+        const result = await mem.ingest(conv.messages, { updatedAt: conv.updatedAt });
         totalWriteCalls += result.writeCalls || 0;
         results.push({ session: label, messages: conv.messages.length, writeCalls: result.writeCalls });
     }

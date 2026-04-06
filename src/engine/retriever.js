@@ -1,5 +1,5 @@
 /**
- * MemoryRetrieval — Read path for agentic memory.
+ * MemoryRetriever — Read path for agentic memory.
  *
  * Uses tool-calling via the agentic loop to let the LLM search, read,
  * and assemble relevant memory context. Falls back to brute-force text
@@ -9,9 +9,9 @@ import { runAgenticToolLoop } from './toolLoop.js';
 import { createRetrievalExecutors } from './executors.js';
 import {
     normalizeFactText,
-    parseMemoryBullets,
-    renderMemoryBullet,
-    scoreMemoryBullet,
+    parseBullets,
+    renderBullet,
+    scoreBullet,
     tokenizeQuery
 } from '../bullets/index.js';
 
@@ -66,7 +66,7 @@ const RETRIEVAL_TOOLS = [
     {
         type: 'function',
         function: {
-            name: 'append_mem_to_query',
+            name: 'assemble_context',
             description: 'Assemble the final memory context to attach to the user query. Call this when done selecting and reading files. The content you provide will be used as context for answering the user message.',
             parameters: {
                 type: 'object',
@@ -92,8 +92,8 @@ Instructions:
 2. Use retrieve_file only when you need to search by keyword (e.g. "cooking", "Stanford") — it searches file contents, not paths.
 3. Use list_directory to see ALL files in a directory when the query relates to a broad domain (e.g. list "health" for any medicine/health query).
 4. Read at most ${MAX_FILES_TO_LOAD} files.
-5. When you've found relevant context, call append_mem_to_query with curated excerpts.
-6. If nothing is relevant, call append_mem_to_query with an empty string.
+5. When you've found relevant context, call assemble_context with curated excerpts.
+6. If nothing is relevant, call assemble_context with an empty string.
 
 IMPORTANT — Domain-exhaustive retrieval:
 - When a query touches a domain (health, work, personal), prefer completeness over selectivity within that domain. File descriptions may be incomplete.
@@ -104,7 +104,7 @@ When recent conversation context is provided alongside the query, use it to reso
 Only include content that genuinely helps answer this specific query. Do not include unrelated files from other domains.`;
 
 
-class MemoryRetrieval {
+class MemoryRetriever {
     /**
      * @param {object} deps
      * @param {Function} [deps.onProgress] — callback({ stage, message, tool?, args?, paths? })
@@ -136,7 +136,7 @@ class MemoryRetrieval {
         await this._backend.init();
         const index = await this._backend.getIndex();
 
-        if (!index || await this._isTrivialIndex(index)) {
+        if (!index || await this._isMemoryEmpty(index)) {
             return null;
         }
 
@@ -176,7 +176,7 @@ class MemoryRetrieval {
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userContent }
             ],
-            terminalTool: 'append_mem_to_query',
+            terminalTool: 'assemble_context',
             maxIterations: 8,
             maxOutputTokens: 500,
             temperature: 0,
@@ -284,11 +284,11 @@ class MemoryRetrieval {
 
         const indexedAfterRefresh = this._bulletIndex.getBulletsForPaths(paths);
         for (const item of indexedAfterRefresh) {
-            const score = scoreMemoryBullet(item.bullet, queryTerms);
+            const score = scoreBullet(item.bullet, queryTerms);
             candidates.push({
                 path: item.path,
                 score,
-                text: renderMemoryBullet(item.bullet),
+                text: renderBullet(item.bullet),
                 updatedAt: item.bullet.updatedAt || '',
                 fileUpdatedAt: item.fileUpdatedAt || 0
             });
@@ -299,15 +299,15 @@ class MemoryRetrieval {
             for (const path of paths) {
                 const raw = await this._backend.read(path);
                 if (!raw) continue;
-                const bullets = parseMemoryBullets(raw);
+                const bullets = parseBullets(raw);
                 if (bullets.length > 0) {
                     for (const bullet of bullets) {
-                        const score = scoreMemoryBullet(bullet, queryTerms);
-                        candidates.push({ path, score, text: renderMemoryBullet(bullet), updatedAt: bullet.updatedAt || '' });
+                        const score = scoreBullet(bullet, queryTerms);
+                        candidates.push({ path, score, text: renderBullet(bullet), updatedAt: bullet.updatedAt || '' });
                     }
                     continue;
                 }
-                for (const snippet of this._extractLegacySnippets(raw, queryTerms)) {
+                for (const snippet of this._scoreRawLines(raw, queryTerms)) {
                     candidates.push({ path, score: snippet.score, text: `- ${snippet.text}`, updatedAt: '' });
                 }
             }
@@ -370,7 +370,7 @@ class MemoryRetrieval {
         return result || null;
     }
 
-    _extractLegacySnippets(content, queryTerms) {
+    _scoreRawLines(content, queryTerms) {
         const lines = String(content || '')
             .split('\n')
             .map((line) => line.trim())
@@ -405,7 +405,7 @@ class MemoryRetrieval {
         return tail.trim() || null;
     }
 
-    async _isTrivialIndex(index) {
+    async _isMemoryEmpty(index) {
         const all = await this._backend.exportAll();
         const realFiles = all.filter(f => !f.path.endsWith('_index.md'));
         if (realFiles.length === 0) return true;
@@ -413,4 +413,4 @@ class MemoryRetrieval {
     }
 }
 
-export { MemoryRetrieval };
+export { MemoryRetriever };

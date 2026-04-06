@@ -19,7 +19,7 @@
  *   ls(dirPath)     → {files: string[], dirs: string[]}
  *   getIndex()      → string
  */
-import { parseMemoryBullets, extractMemoryTitles, countMemoryBullets } from '../bullets/index.js';
+import { parseBullets, extractTitles, countBullets } from '../bullets/index.js';
 
 export class BaseStorage {
 
@@ -47,9 +47,9 @@ export class BaseStorage {
         }
         const str = String(content || '');
         const meta = {
-            l0: this._generateL0(str),
-            itemCount: countMemoryBullets(str),
-            titles: extractMemoryTitles(str),
+            oneLiner: this._generateOneLiner(str),
+            itemCount: countBullets(str),
+            titles: extractTitles(str),
         };
         await this._writeRaw(path, str, meta);
         await this.rebuildIndex();
@@ -125,10 +125,10 @@ export class BaseStorage {
     }
 
     /** Generate a one-line summary of file content for the index. */
-    _generateL0(content) {
+    _generateOneLiner(content) {
         if (!content) return '';
 
-        const bullets = parseMemoryBullets(content);
+        const bullets = parseBullets(content);
         if (bullets.length > 0) {
             const factTexts = bullets
                 .filter(b => b.section !== 'archive')
@@ -141,7 +141,7 @@ export class BaseStorage {
             }
         }
 
-        const titles = extractMemoryTitles(content);
+        const titles = extractTitles(content);
         if (titles.length > 0) {
             const joined = titles.join('; ');
             return joined.length > 120 ? joined.slice(0, 117) + '...' : joined;

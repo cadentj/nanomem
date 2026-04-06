@@ -10,8 +10,9 @@
 import {
     compactBullets,
     inferTopicFromPath,
-    parseMemoryBullets,
-    renderCompactedMemoryDocument
+    parseBullets,
+    todayIsoDate,
+    renderCompactedDocument
 } from '../bullets/index.js';
 
 
@@ -90,11 +91,11 @@ class MemoryCompactor {
         if (!raw) return null;
 
         // Structured files: deterministic local compaction.
-        const parsed = parseMemoryBullets(raw);
+        const parsed = parseBullets(raw);
         if (parsed.length > 0) {
             const defaultTopic = inferTopicFromPath(path);
             const compacted = compactBullets(parsed, { defaultTopic });
-            return renderCompactedMemoryDocument(
+            return renderCompactedDocument(
                 compacted.working, compacted.longTerm, compacted.history,
                 { titleTopic: defaultTopic }
             );
@@ -102,7 +103,7 @@ class MemoryCompactor {
 
         // Unstructured/legacy files: LLM rewrite.
         const prompt = COMPACTION_PROMPT
-            .replace('{TODAY}', new Date().toISOString().slice(0, 10))
+            .replace('{TODAY}', todayIsoDate())
             .replace('{PATH}', path)
             .replace('{CONTENT}', raw.length > MAX_FILE_CHARS ? raw.slice(0, MAX_FILE_CHARS) + '\n...(truncated)' : raw);
 

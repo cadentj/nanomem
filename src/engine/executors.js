@@ -13,8 +13,8 @@ import {
     compactBullets,
     inferTopicFromPath,
     normalizeFactText,
-    parseMemoryBullets,
-    renderCompactedMemoryDocument,
+    parseBullets,
+    renderCompactedDocument,
 } from '../bullets/index.js';
 
 /**
@@ -55,10 +55,10 @@ export function createRetrievalExecutors(backend) {
 /**
  * Build tool executors for the extraction (write) flow.
  * @param {object} backend — storage backend
- * @param {object} [helpers] — { normalizeContent, mergeWithExisting, refreshIndex }
+ * @param {object} [hooks] — { normalizeContent, mergeWithExisting, refreshIndex }
  */
-export function createExtractionExecutors(backend, helpers = {}) {
-    const { normalizeContent, mergeWithExisting, refreshIndex } = helpers;
+export function createExtractionExecutors(backend, hooks = {}) {
+    const { normalizeContent, mergeWithExisting, refreshIndex } = hooks;
 
     return {
         read_file: async ({ path }) => {
@@ -116,12 +116,12 @@ function removeArchivedItem(content, itemText, path) {
     const target = normalizeFactText(itemText);
     if (!target) return null;
 
-    const parsed = parseMemoryBullets(raw);
+    const parsed = parseBullets(raw);
     if (parsed.length > 0) {
         const remaining = parsed.filter((bullet) => normalizeFactText(bullet.text) !== target);
         if (remaining.length === parsed.length) return null;
         const compacted = compactBullets(remaining, { defaultTopic: inferTopicFromPath(path), maxActivePerTopic: 1000 });
-        return renderCompactedMemoryDocument(
+        return renderCompactedDocument(
             compacted.working, compacted.longTerm, compacted.history,
             { titleTopic: inferTopicFromPath(path) }
         );
