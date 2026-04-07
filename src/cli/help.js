@@ -11,7 +11,7 @@ Commands:
 
   Engine:
     init                                    Initialize storage (seeds default files)
-    import <file|->                         Import conversations and extract facts
+    import <file|dir|->                     Import conversations and extract facts
     retrieve <query> [--context <file>]     Retrieve relevant context for a query
     compact                                 Deduplicate and archive stale facts
     export [--format txt|zip]               Export all memory to a txt file or a zip file
@@ -49,6 +49,7 @@ Examples:
   memory import conversation.json
   echo '[{"role":"user","content":"I like cats"}]' | memory import -
   memory import chatgpt-export.json
+  memory import my-notes.md
   memory retrieve "what are my hobbies?"
   memory write notes/todo.md --content "buy groceries"
   memory export
@@ -65,7 +66,7 @@ export const COMMAND_HELP = {
     delete: 'Usage: memory delete <path>\n\nDelete a file from storage.',
     search: 'Usage: memory search <query>\n\nSearch files by keyword.',
     export: 'Usage: memory export [--format txt|zip]\n\nExport all memory to a timestamped file in the current directory.\nDefault format is txt (line-delimited text). Use --format zip for a ZIP archive.',
-    import: 'Usage: memory import <file|->\n\nImport conversations and extract facts into memory.\n\nAuto-detects format:\n  - ChatGPT export (conversations.json from "Export data")\n  - OA Fastchat export (JSON with data.chats.sessions)\n  - JSON messages array ([{role, content}, ...])\n  - Plain text (User:/Assistant: lines)\n\nFor multi-session exports, use --session-id or --session-title to filter.\nRequires an LLM API key.',
+    import: 'Usage: memory import <file|dir|->\n\nImport conversations and extract facts into memory.\n\nAuto-detects format:\n  - ChatGPT export (conversations.json from "Export data")\n  - OA Fastchat export (JSON with data.chats.sessions)\n  - JSON messages array ([{role, content}, ...])\n  - Plain text (User:/Assistant: lines)\n  - Markdown notes (any other text — splits by top-level headings)\n\nPass a directory to import all .md files from it recursively.\n\nFor multi-session exports, use --session-id or --session-title to filter.\nRequires an LLM API key.',
     clear: 'Usage: memory clear --confirm\n\nDelete all memory files. Requires --confirm to prevent accidental data loss.',
     status: 'Usage: memory status\n\nShow resolved config and storage statistics.',
 };

@@ -2,12 +2,13 @@
  * CLI command implementations — thin wrappers around the library API.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
 import { serialize, toZip } from '../utils/portability.js';
 import { safeDateIso } from '../bullets/normalize.js';
 import { extractSessionsFromOAFastchatExport } from '../imports/oaFastchat.js';
 import { isChatGptExport, parseChatGptExport } from '../imports/chatgpt.js';
+import { parseMarkdownFiles } from '../imports/markdown.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -15,6 +16,20 @@ async function readStdin() {
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     return Buffer.concat(chunks).toString('utf-8');
+}
+
+async function readMarkdownDir(dirPath) {
+    const entries = await readdir(dirPath, { recursive: true });
+    const files = [];
+    for (const entry of entries) {
+        if (!entry.endsWith('.md')) continue;
+        const fullPath = join(dirPath, entry);
+        const info = await stat(fullPath);
+        if (!info.isFile()) continue;
+        const content = await readFile(fullPath, 'utf-8');
+        files.push({ path: entry, content });
+    }
+    return files;
 }
 
 function buildExportPath(format) {
@@ -84,7 +99,8 @@ function parseConversations(input, flags) {
     if (current) messages.push(current);
 
     if (messages.length === 0) {
-        throw new Error('Could not parse input. Supported formats: JSON messages array, OA Fastchat export, or User:/Assistant: text.');
+        // Fallback: treat as plain markdown notes to extract facts from
+        return parseMarkdownFiles(trimmed);
     }
     return [{ title: null, messages }];
 }
@@ -116,17 +132,22 @@ export async function retrieve(positionals, flags, mem) {
 
 export async function importCmd(positionals, flags, mem, config, { showProgress } = {}) {
     const source = positionals[0];
-    let input;
+    let conversations;
 
     if (source === '-' || (!source && !process.stdin.isTTY)) {
-        input = await readStdin();
+        conversations = parseConversations(await readStdin(), flags);
     } else if (source) {
-        input = await readFile(source, 'utf-8');
+        const info = await stat(source);
+        if (info.isDirectory()) {
+            const files = await readMarkdownDir(source);
+            if (files.length === 0) throw new Error(`No .md files found in ${source}`);
+            conversations = parseMarkdownFiles(files);
+        } else {
+            conversations = parseConversations(await readFile(source, 'utf-8'), flags);
+        }
     } else {
-        throw new Error('Usage: memory import <file|->');
+        throw new Error('Usage: memory import <file|dir|->');
     }
-
-    const conversations = parseConversations(input, flags);
     await mem.init();
 
     const total = conversations.length;

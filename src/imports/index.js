@@ -8,3 +8,7 @@ export {
     isChatGptExport,
     parseChatGptExport,
 } from './chatgpt.js';
+
+export {
+    parseMarkdownFiles,
+} from './markdown.js';

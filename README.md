@@ -23,6 +23,8 @@ export TINFOIL_API_KEY=...
 
 memory init
 memory import conversation.json
+memory import my-notes.md
+memory import ./notes/
 memory retrieve "what are my hobbies?"
 memory status
 ```
@@ -41,7 +43,7 @@ Info:
 
 Engine:
   init                                    Initialize storage (seeds default files)
-  import <file|->                         Import conversations and extract facts
+  import <file|dir|->                     Import conversations and extract facts
   retrieve <query> [--context <file>]     Retrieve relevant context for a query
   compact                                 Deduplicate and archive stale facts
 
@@ -75,7 +77,16 @@ Storage:
 - **OA Fastchat export** — JSON with `data.chats.sessions`
 - **JSON messages array** — `[{role, content}, ...]`
 - **Plain text** — `User:` / `Assistant:` lines
+- **Markdown notes** — any other text input; splits by top-level headings
+- **Markdown directory import** — pass a directory to import all `.md` files recursively
 - Pipe from stdin: `echo '[{"role":"user","content":"I like cats"}]' | memory import -`
+
+Examples:
+
+```bash
+memory import notes.md
+memory import ./notes/
+```
 
 ### Environment Variables
 
