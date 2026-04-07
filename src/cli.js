@@ -36,6 +36,7 @@ const OPTIONS = {
 };
 
 const COMMAND_MAP = {
+    login:    commands.login,
     init:     commands.init,
     retrieve: commands.retrieve,
     import:   commands.importCmd,
@@ -86,7 +87,7 @@ async function main() {
         die(`Unknown command: ${commandName}\n\n${GLOBAL_HELP}`);
     }
 
-    const config = resolveConfig(values);
+    const config = await resolveConfig(values);
     const memOpts = {};
 
     // Wire progress for import/extract — show tool calls in real-time

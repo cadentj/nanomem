@@ -4,24 +4,43 @@ LLM-driven memory for agentic systems. Plug it into any agent to give it persist
 
 The system uses an LLM to decide what to save (extraction), what to recall (retrieval), and how to consolidate (compaction). Memory is stored as human-readable markdown — not hidden vector state.
 
+## Installation
+
+```bash
+npm install -g @openanonymity/memory
+```
+
+Then log in:
+
+```bash
+memory login
+```
+
+Prompts for provider (openai / anthropic / tinfoil) and API key. Credentials are saved to `~/.memory/config.json`.
+
+Save a model preference or custom storage path alongside your key:
+```bash
+memory login --model gpt-4o-mini
+memory login --path ~/work/memory
+```
+
+`--model` is optional. Defaults: `gpt-4o` (OpenAI), `claude-sonnet-4-6` (Anthropic), `kimi-k2-5` (Tinfoil).
+
+Non-interactive / CI:
+```bash
+memory login --provider openai --api-key sk-... --model gpt-4o-mini
+# or use environment variables — they always take precedence over the config file
+export OPENAI_API_KEY=sk-...
+```
+
+**Local development:**
+```bash
+npm install -g .   # or: npm link
+```
+
 ## CLI
 
 ```bash
-# For local development in this repo:
-npm install -g .
-# or
-npm link
-```
-
-Set an API key and start using it:
-
-```bash
-# Any one of these will work:
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...
-export TINFOIL_API_KEY=...
-
-memory init
 memory import conversation.json
 memory import my-notes.md
 memory import ./notes/
@@ -29,15 +48,20 @@ memory retrieve "what are my hobbies?"
 memory status
 ```
 
-By default, memory stores files in `~/.memory` using the filesystem backend, and auto-detects your LLM provider from the API key you set (defaulting to `gpt-4o` for OpenAI, `claude-sonnet-4-6` for Anthropic, `kimi-k2-5` for Tinfoil). Override with flags:
+By default, memory stores files in `~/.memory` using the filesystem backend, and auto-detects your LLM provider from the API key you set (defaulting to `gpt-4o` for OpenAI, `claude-sonnet-4-6` for Anthropic, `kimi-k2-5` for Tinfoil). Override with flags or save permanently via `memory login`:
 
 ```bash
-memory init --path ~/my-memory --provider anthropic --model claude-sonnet-4-6
+memory import file.json --path ~/my-memory --provider anthropic --model claude-haiku-4-5-20251001
+# or save once:
+memory login --path ~/my-memory --provider anthropic --model claude-haiku-4-5-20251001
 ```
 
 ### Commands
 
 ```
+Auth:
+  login                                   Save credentials to ~/.memory/config.json
+
 Info:
   status                                  Show config and storage stats
 
@@ -78,15 +102,8 @@ Storage:
 - **JSON messages array** — `[{role, content}, ...]`
 - **Plain text** — `User:` / `Assistant:` lines
 - **Markdown notes** — any other text input; splits by top-level headings
-- **Markdown directory import** — pass a directory to import all `.md` files recursively
+- **Directory** — pass a folder to import all `.md` files recursively
 - Pipe from stdin: `echo '[{"role":"user","content":"I like cats"}]' | memory import -`
-
-Examples:
-
-```bash
-memory import notes.md
-memory import ./notes/
-```
 
 ### Environment Variables
 
@@ -99,6 +116,8 @@ LLM_BASE_URL            Override base URL
 LLM_MODEL               Override model
 LLM_PROVIDER            Override provider detection
 ```
+
+Priority order (highest wins): CLI flags → `LLM_*` env vars → provider env vars → `~/.memory/config.json` → defaults
 
 ## Library API
 
@@ -277,11 +296,11 @@ There is no hardcoded folder structure. The LLM organizes files into folders nat
 src/
 ├── index.js          — createMemoryBank(), public API
 ├── cli.js            — CLI entry point
-├── cli/              — CLI: config, commands, help, output formatting
+├── cli/              — CLI: auth, config, commands, help, output formatting
 ├── engine/           — LLM-driven: retriever, ingester, compactor, executors, toolLoop
 ├── backends/         — storage backends: ram, filesystem, indexeddb, BaseStorage, schema
 ├── bullets/          — bullet format utilities: parser, normalize, scoring, compaction
 ├── llm/              — LLM client wrappers: openai, anthropic
-├── imports/          — chat format parsers: oaFastchat
+├── imports/          — import parsers: chatgpt, oaFastchat, markdown
 └── utils/            — portability (serialize/toZip)
 ```

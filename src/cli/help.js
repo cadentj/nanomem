@@ -6,6 +6,9 @@ export const GLOBAL_HELP = `Usage: memory <command> [args] [flags]
 
 Commands:
 
+  Auth:
+    login                                   Save credentials to ~/.memory/config.json
+
   Info:
     status                                  Show config and storage stats
 
@@ -69,4 +72,17 @@ export const COMMAND_HELP = {
     import: 'Usage: memory import <file|dir|->\n\nImport conversations and extract facts into memory.\n\nAuto-detects format:\n  - ChatGPT export (conversations.json from "Export data")\n  - OA Fastchat export (JSON with data.chats.sessions)\n  - JSON messages array ([{role, content}, ...])\n  - Plain text (User:/Assistant: lines)\n  - Markdown notes (any other text — splits by top-level headings)\n\nPass a directory to import all .md files from it recursively.\n\nFor multi-session exports, use --session-id or --session-title to filter.\nRequires an LLM API key.',
     clear: 'Usage: memory clear --confirm\n\nDelete all memory files. Requires --confirm to prevent accidental data loss.',
     status: 'Usage: memory status\n\nShow resolved config and storage statistics.',
+    login: `Usage: memory login [--provider <name>] [--api-key <key>] [--model <model>] [--path <dir>]
+
+Save credentials and preferences to ~/.memory/config.json.
+
+Interactive mode (default):
+  Prompts for provider and API key. Works for OpenAI, Anthropic, and Tinfoil.
+  Pass --model or --path to also save those preferences:
+    memory login --model gpt-4o-mini
+    memory login --path ~/work/memory
+
+Non-interactive mode (for scripts):
+  memory login --provider openai --api-key sk-... --model gpt-4o-mini
+  memory login --provider anthropic --api-key sk-ant-...`,
 };

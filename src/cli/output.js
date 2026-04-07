@@ -43,6 +43,7 @@ function formatHuman(result) {
             '  Storage',
             `    Backend       ${result.storage}`,
             `    Path          ${result.storagePath}`,
+            `    Config        ${result.configFile}`,
             `    Files         ${result.files}`,
             `    Directories   ${dirs}`,
         ].join('\n');
@@ -108,6 +109,11 @@ function formatAction(result) {
             return lines('\u2713 Memory cleared', [
                 ['Files deleted', result.filesDeleted],
                 ['Path', result.path],
+            ]);
+        case 'logged_in':
+            return lines('\u2713 Logged in', [
+                ['Provider', result.provider],
+                ['Config',   result.configFile],
             ]);
         case 'error':
             return `\u2717 Extraction failed: ${result.error || 'unknown error'}`;

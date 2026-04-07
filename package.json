@@ -9,7 +9,15 @@
     "engines": {
         "node": ">=18"
     },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/openanonymity/memory.git"
+    },
+    "bugs": {
+        "url": "https://github.com/openanonymity/memory/issues"
+    },
     "scripts": {
+        "prepublishOnly": "npm run build:types",
         "build:types": "tsc",
         "prepack": "tsc"
     },
