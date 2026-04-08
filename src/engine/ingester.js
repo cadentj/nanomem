@@ -25,11 +25,11 @@ const EXTRACTION_TOOLS = [
         type: 'function',
         function: {
             name: 'read_file',
-            description: 'Read the content of an existing memory file to inspect before writing.',
+            description: 'Read an existing memory file before writing.',
             parameters: {
                 type: 'object',
                 properties: {
-                    path: { type: 'string', description: 'File path to read (e.g. personal/about.md)' }
+                    path: { type: 'string', description: 'File path (e.g. personal/about.md)' }
                 },
                 required: ['path']
             }
@@ -39,7 +39,7 @@ const EXTRACTION_TOOLS = [
         type: 'function',
         function: {
             name: 'create_new_file',
-            description: 'Create a new memory file. Use for an entirely new topic that does not fit any existing file.',
+            description: 'Create a new memory file for a topic not covered by any existing file.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -69,7 +69,7 @@ const EXTRACTION_TOOLS = [
         type: 'function',
         function: {
             name: 'update_memory',
-            description: 'Overwrite an existing memory file with new content. Use when existing content is stale or contradicted.',
+            description: 'Overwrite an existing memory file. Use when existing content is stale or contradicted.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -77,35 +77,6 @@ const EXTRACTION_TOOLS = [
                     content: { type: 'string', description: 'Complete new content for the file' }
                 },
                 required: ['path', 'content']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'archive_memory',
-            description: 'Remove a specific bullet point or item from a memory file.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: { type: 'string', description: 'File path containing the item' },
-                    item_text: { type: 'string', description: 'The exact text of the item to remove' }
-                },
-                required: ['path', 'item_text']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'delete_memory',
-            description: 'Delete an entire memory file.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: { type: 'string', description: 'File path to delete' }
-                },
-                required: ['path']
             }
         }
     }
@@ -167,7 +138,7 @@ class MemoryIngester {
                     { role: 'user', content: userMessage }
                 ],
                 maxIterations: 12,
-                maxOutputTokens: 4000,
+                maxOutputTokens: isDocument ? 4000 : 1500,
                 temperature: 0,
                 onToolCall: (name, args, result) => {
                     onToolCall?.(name, args, result);

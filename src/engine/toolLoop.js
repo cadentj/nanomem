@@ -76,6 +76,16 @@ export async function runAgenticToolLoop(options) {
             response = await llmClient.createChatCompletion(requestPayload);
         }
 
+        // If output was truncated and no tool calls came through, retry once with 2× tokens.
+        if (response.finish_reason === 'length' && (response.tool_calls || []).length === 0) {
+            const retryTokens = requestPayload.max_tokens * 2;
+            const retryPayload = { ...requestPayload, max_tokens: retryTokens };
+            iterationText = '';
+            response = useStreaming
+                ? await llmClient.streamChatCompletion({ ...retryPayload, onDelta: (d) => { iterationText += d; }, onReasoning: (d) => { onReasoning(d, iterations); } })
+                : await llmClient.createChatCompletion(retryPayload);
+        }
+
         const responseToolCalls = response.tool_calls || [];
         const responseText = iterationText || response.content || '';
 
