@@ -1,244 +1,118 @@
 # Memory System Internals
 
-This document covers the implementation details of `@openanonymity/memory`. For the user-facing API, see the [README](../README.md).
+This document gives a high-level view of how `@openanonymity/memory` works internally. For installation and usage, see the [README](../README.md).
 
-## Architecture
+## Core Idea
 
-```text
-src/
-  index.js              — entry point, public API factory
-  cli.js                — CLI entry point
-  cli/                  — CLI: config, commands, help, output formatting
-  engine/
-    retriever.js        — read path: find relevant memories
-    ingester.js        — write path: save new memories
-    compactor.js        — maintenance: consolidate memories
-    executors.js        — bridge: translates LLM tool calls into storage operations
-    toolLoop.js         — generic agentic tool-calling loop engine
-  bullets/
-    normalize.js        — metadata normalization (source, confidence, tier, etc.)
-    parser.js           — parse/render markdown bullets
-    scoring.js          — relevance scoring for retrieval
-    compaction.js       — deduplication, tier assignment, strength ordering
-    bulletIndex.js      — in-memory cache of parsed bullets
-    index.js            — barrel re-export
-  backends/
-    BaseStorage.js      — abstract interface + shared logic
-    ram.js              — in-memory backend (testing/ephemeral)
-    filesystem.js       — Node.js filesystem backend
-    indexeddb.js        — browser IndexedDB backend
-    schema.js           — bootstrap and index generation
-  llm/
-    openai.js           — OpenAI-compatible API client
-    anthropic.js        — Anthropic Messages API client
-  imports/
-    oaFastchat.js       — conversation import from OA Fastchat exports
-    chatgpt.js          — conversation import from ChatGPT exports
-  utils/
-    portability.js      — serialize/toZip utilities
-```
+The system is built around two ideas:
 
-Three layers:
+- memory should stay user-visible and portable
+- memory should be maintained as evolving state, not just retrieved as static context
 
-1. **Core flows** (`core/`) — retrieval, extraction, compaction. The "what."
-2. **Data format** (`bullets/`) — parsing, normalization, scoring, compaction logic. The "shape of data."
-3. **Infrastructure** (`storage/`, `llm/`) — where bytes live, how to talk to LLMs. The "how."
+That means the system is designed to do more than store history and search it later. It tries to keep memory current, compact, and historically aware while still storing it as a plain markdown memory filesystem.
+
+## Three Core Flows
+
+The architecture has three main flows:
+
+- **Ingestion** turns conversations or documents into structured memory
+- **Retrieval** assembles relevant memory for a query
+- **Compaction** keeps memory coherent over time
+
+These three flows are the core of the system.
+
+## Prompt Modes
+
+Ingestion supports two high-level modes:
+
+- **Conversation mode** for chats and transcripts
+- **Document mode** for notes, READMEs, repositories, and knowledge bases
+
+In practice:
+
+- conversation-like inputs use stricter extraction
+- document-like inputs use broader extraction
+
+The CLI selects these modes automatically in common cases, while still allowing explicit control when needed.
+
+## Ingestion
+
+Ingestion is the write path.
+
+The system reads a conversation or document, looks at the current file tree, and decides whether to:
+
+- create a new memory file
+- append to an existing one
+- update a stale one
+- archive outdated information
+- delete memory that is no longer useful
+
+The goal is to turn raw input into reusable memory rather than keeping every interaction forever.
+
+## Retrieval
+
+Retrieval is the read path.
+
+The system first uses the file tree to decide which memory files matter for a query. It then looks more closely at the facts inside those files and assembles relevant context.
+
+This is intentionally more structured than plain keyword search or vector retrieval alone:
+
+- file-level selection narrows the search space
+- fact-level scoring surfaces the most useful memory
+- recent conversation context can help resolve references like “that” or “the same one”
+
+If the model-based retrieval path fails, the system can fall back to simpler search over stored files.
+
+## Compaction
+
+Compaction is the maintenance path.
+
+Its job is to keep memory useful as it grows:
+
+- merge duplicates
+- keep current memory concise
+- move stale or superseded facts into history
+- preserve older information without treating it as current
+
+This is what lets the system maintain memory over time instead of just accumulating more text.
+
+## The Memory Model
+
+Memory is stored as markdown with structured metadata attached to each fact.
+
+At a high level, the model tracks:
+
+- **topic**: what domain a fact belongs to
+- **tier**: whether it is working memory, long-term memory, or history
+- **status**: whether it is active, superseded, expired, or uncertain
+- **source and confidence**: where the fact came from and how much to trust it
+- **time information**: when it was updated and whether it should be reviewed or expire
+
+This structure is what makes the system time-aware and conflict-aware.
 
 ## The Two Indexes
 
-The system has two indexes that serve different purposes at different granularities.
+The system keeps two indexes:
 
-### File index (`_tree.md`) — persistent, for the LLM
+- a **persistent file tree** that helps the model navigate the memory filesystem
+- an **in-memory fact index** that helps retrieval score individual facts after files are selected
 
-A markdown file stored in the storage backend. Lists every memory file with path, item count, last-updated date, and a one-line summary (`l0`).
+They exist because file selection and fact ranking are different problems at different levels of granularity.
 
-```markdown
-# Memory Index
+## Conflict Resolution
 
-- health/allergies.md (2 items, updated 2025-03-12) — Allergic to peanuts; Allergic to shellfish
-- work/role.md (3 items, updated 2025-03-10) — Software engineer at Acme; Leads backend team
-```
+Conflict handling is split across the system:
 
-- Rebuilt every time a file is written or deleted (`storage.rebuildTree()`)
-- The `oneLiner` summary is generated by `BaseStorage._generateOneLiner()` — it takes the first few bullet texts or headings
-- The retrieval and extraction LLMs read this to decide which files to open without reading every file
+- ingestion helps decide how new information should update existing memory
+- compaction helps clean up duplicates, stale facts, and superseded entries
 
-### Bullet index (`MemoryBulletIndex`) — in-memory, for scoring
+In practice, this allows the system to:
 
-A RAM-only cache mapping file paths to pre-parsed bullet objects:
+- keep repeated facts from piling up
+- distinguish current facts from historical ones
+- preserve history without mixing it into active context
+- handle contradictions more deliberately than an append-only log
 
-```
-_pathToBullets: Map {
-  'health/allergies.md' → [{ text: "Allergic to peanuts", source: "user_statement", ... }, ...],
-  'work/role.md'        → [{ text: "Software engineer at Acme", ... }, ...]
-}
-```
+## Storage Model
 
-- Not persisted — rebuilt from storage on first access
-- Refreshed per-path after each write (`bulletIndex.refreshPath(path)`)
-- Used during retrieval: after the LLM selects files, the system scores individual bullets against the query using `scoreBullet()` and assembles the top-scoring snippets
-
-### Why two?
-
-| | File index (`_tree.md`) | Bullet index (RAM) |
-|---|---|---|
-| Consumer | The LLM | The scoring system |
-| Granularity | File-level | Bullet-level |
-| Persisted | Yes | No |
-| Purpose | "Which files should I read?" | "Which facts are most relevant?" |
-
-Both are updated on every write/delete to stay in sync.
-
-## End-to-End Flows
-
-### Extraction (write path)
-
-```
-memory.ingest(messages)
-        │
-        ▼
-  Extractor builds system prompt with current _tree.md
-        │
-        ▼
-  LLM runs in tool loop (toolLoop.js)
-    - reads existing files to check for duplicates
-    - calls create_new_file / append_memory / update_memory / etc.
-        │
-        ▼
-  Executors (executors.js) handle each tool call:
-    - normalizeContent: parses bullets, normalizes metadata, compacts
-    - mergeWithExisting: merges new bullets with existing file content
-    - writes to storage backend
-        │
-        ▼
-  Both indexes updated:
-    - storage.write() triggers rebuildTree() → _tree.md refreshed
-    - refreshIndex() → bulletIndex re-parses the written file
-```
-
-### Retrieval (read path)
-
-```
-memory.retrieve(query)
-        │
-        ▼
-  1. LLM reads _tree.md (file index)
-     → sees file summaries, decides which to open
-        │
-        ▼
-  2. LLM calls read_file / retrieve_file / list_directory
-     → navigates the memory filesystem
-        │
-        ▼
-  3. LLM calls assemble_context with curated context
-        │
-        ▼
-  4. System uses bulletIndex to score individual bullets
-     from selected files against query terms
-     → assembles top-scoring snippets as final context
-        │
-        ▼
-  Returns { files, paths, assembledContext }
-```
-
-If the LLM call fails, retrieval falls back to brute-force text search across all files.
-
-If `conversationText` is provided, it's included in the retrieval prompt so the LLM can resolve references like "that", "the same one", "what we discussed."
-
-### Compaction (maintenance)
-
-```
-memory.compact()
-        │
-        ▼
-  For each memory file:
-    - If file has structured bullets → deterministic local compaction
-      (dedup by normalized text, sort by strength, enforce per-topic limits)
-    - If unstructured/legacy content → LLM rewrite into canonical format
-        │
-        ▼
-  Write back compacted content, refresh both indexes
-```
-
-The host application decides when to call `compact()`. The library does not schedule it.
-
-## Core Module Relationships
-
-```text
-engine/retriever.js / engine/ingester.js  — define tool schemas (what the LLM sees)
-engine/executors.js                        — implement those tools (what runs when called)
-engine/toolLoop.js                         — generic engine connecting the two
-```
-
-The executors are the bridge between the tool loop and storage. They translate tool calls like `read_file`, `append_memory` into storage operations.
-
-Extraction executors accept three injectable hooks from ingester.js:
-- `normalizeContent(content, path)` — normalize bullet metadata before writing
-- `mergeWithExisting(existing, incoming, path)` — merge new bullets with existing file content, dedup
-- `refreshIndex(path)` — update the bullet index after a write
-
-This keeps the executors as pure storage I/O. The bullet-format knowledge lives in the extractor.
-
-## Data Model
-
-### Bullet metadata
-
-Each bullet can carry:
-
-| Field | Values | Purpose |
-|-------|--------|---------|
-| `topic` | any string | Normalized topic name |
-| `tier` | `working`, `long_term`, `history` | Temporal classification |
-| `status` | `active`, `superseded`, `expired`, `uncertain` | Current validity |
-| `source` | `user_statement`, `assistant_summary`, `inference`, `system` | Where the fact came from |
-| `confidence` | `high`, `medium`, `low` | How certain we are |
-| `updated_at` | ISO date | When last modified |
-| `review_at` | ISO date (optional) | When to revisit working-tier items |
-| `expires_at` | ISO date (optional) | Auto-expire to history |
-
-### Strength ordering
-
-When compaction encounters duplicate facts (same normalized text), it keeps the stronger variant:
-
-1. Higher source priority: `user_statement` > `assistant_summary` > `system` > `inference`
-2. Higher confidence: `high` > `medium` > `low`
-3. More recent `updated_at`
-
-### Conflict resolution
-
-Semantic conflict detection (recognizing that "I am vegetarian" contradicts "I like steak") is delegated to the LLM during extraction. The extractor reads existing files before writing and can make that judgment contextually.
-
-The compaction layer handles mechanical concerns: deduplication, expiration, and strength-based ordering. It does not attempt heuristic NLP conflict detection.
-
-## Storage Interface
-
-All backends extend `BaseStorage`. Subclasses implement seven methods:
-
-```
-init()                → void
-read(path)            → string | null
-write(path, content)  → void
-delete(path)          → void
-exists(path)          → boolean
-rebuildTree()        → void
-exportAll()           → [{ path, content, updatedAt, itemCount, oneLiner }]
-```
-
-`BaseStorage` provides default implementations for:
-- `search(query)` — substring search across all file contents
-- `ls(dirPath)` — directory listing derived from file paths
-- `getTree()` — reads `_tree.md`
-- `_generateOneLiner(content)` — one-line summary from bullet texts or headings
-- `_parentPath(filePath)` — extract parent directory
-
-Subclasses can override `_listAllPaths()` for more efficient `ls()` (e.g. filesystem backend avoids reading file contents just to list paths).
-
-## Recommended Reading Order
-
-1. `src/index.js` — public API and wiring
-2. `src/engine/retriever.js` — read path
-3. `src/engine/ingester.js` — write path
-4. `src/engine/executors.js` — tool implementations
-5. `src/engine/toolLoop.js` — generic agentic loop
-6. `src/bullets/` — data format layer (start with `parser.js`, then `normalize.js`)
-7. `src/backends/BaseStorage.js` — storage interface
+The same memory model can run across multiple backends, including local files, browser persistence, and ephemeral in-memory storage.
