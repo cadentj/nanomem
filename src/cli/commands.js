@@ -136,7 +136,6 @@ export async function retrieve(positionals, flags, mem) {
 export async function importCmd(positionals, flags, mem, config, { showProgress, spinnerHolder } = {}) {
     const source = positionals[0];
     let conversations;
-
     let extractionMode = 'conversation';
 
     if (source === '-' || (!source && !process.stdin.isTTY)) {
@@ -155,6 +154,19 @@ export async function importCmd(positionals, flags, mem, config, { showProgress,
     } else {
         throw new Error('Usage: memory import <file|dir|->');
     }
+
+    return ingestConversations(conversations, extractionMode, mem, { showProgress, spinnerHolder, status: 'imported' });
+}
+
+export async function add(positionals, flags, mem, config, { showProgress, spinnerHolder } = {}) {
+    const input = positionals[0] ?? (!process.stdin.isTTY ? await readStdin() : null);
+    if (!input) throw new Error('Usage: memory add <text>');
+
+    const conversations = parseConversations(input, flags);
+    return ingestConversations(conversations, 'conversation', mem, { showProgress, spinnerHolder, status: 'added' });
+}
+
+async function ingestConversations(conversations, extractionMode, mem, { showProgress, spinnerHolder, status }) {
     await mem.init();
 
     const total = conversations.length;
@@ -197,7 +209,7 @@ export async function importCmd(positionals, flags, mem, config, { showProgress,
         results.push({ session: label, messages: conv.messages.length, writeCalls: result.writeCalls, error: result.error });
     }
 
-    return { status: 'imported', sessions: results.length, totalWriteCalls, details: results };
+    return { status, sessions: results.length, totalWriteCalls, details: results };
 }
 
 export async function compact(positionals, flags, mem) {

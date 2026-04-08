@@ -38,6 +38,7 @@ const OPTIONS = {
 };
 
 const COMMAND_MAP = {
+    add:      commands.add,
     login:    commands.login,
     init:     commands.init,
     retrieve: commands.retrieve,
@@ -94,7 +95,7 @@ async function main() {
     const memOpts = {};
 
     // Wire progress for import/extract — spinner per session with live tool call updates
-    const isImport = commandName === 'import' || commandName === 'extract';
+    const isImport = commandName === 'import' || commandName === 'add' || commandName === 'extract';
     const showProgress = isImport && !values.json && process.stderr.isTTY;
     const spinnerHolder = { current: null }; // shared mutable ref between onToolCall and import loop
     if (showProgress) {

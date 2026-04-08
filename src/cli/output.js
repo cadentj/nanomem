@@ -136,6 +136,11 @@ function formatAction(result) {
                 ['Sessions',      result.sessions],
                 ['Files updated', result.totalWriteCalls],
             ]);
+        case 'added':
+            return section(green('✓ Text added to memory'), [
+                ['Sessions',      result.sessions],
+                ['Files updated', result.totalWriteCalls],
+            ]);
         case 'exported':
             return section(green('✓ Memory exported'), [
                 ['Files',  result.files],
