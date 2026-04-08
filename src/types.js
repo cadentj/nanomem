@@ -213,6 +213,9 @@
 /**
  * @typedef {object} IngestOptions
  * @property {string} [updatedAt]
+ * @property {'conversation' | 'document' | string} [mode] - Prompt set to use for extraction
+ * @property {'conversation' | 'document' | string} [extractionMode] - Alias for mode (deprecated, use mode)
+ * @property {string} [sessionTitle]
  */
 
 /**
