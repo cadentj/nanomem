@@ -7,6 +7,7 @@
 /** @import { IngestOptions, IngestResult, LLMClient, Message, StorageBackend, ToolDefinition } from '../types.js' */
 import { runAgenticToolLoop } from './toolLoop.js';
 import { createExtractionExecutors } from './executors.js';
+import { resolvePromptSet } from '../prompts/index.js';
 import {
     compactBullets,
     ensureBulletMetadata,
@@ -110,52 +111,6 @@ const EXTRACTION_TOOLS = [
     }
 ];
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a memory manager. After reading a conversation, decide if any concrete, reusable facts should be saved to the user's memory files.
-
-CRITICAL: Only save facts the user explicitly stated. Do NOT infer, extrapolate, or fabricate information.
-
-Save information that is likely to help in a future conversation. Be selective — only save durable facts, not transient conversation details.
-
-Do NOT save:
-- Anything the user did not explicitly say (no inferences, no extrapolations, no "likely" facts)
-- Information already present in existing files (use read_file to check first)
-- Transient details (greetings, "help me with this", "thanks", questions without lasting answers)
-- The assistant's own reasoning, suggestions, or knowledge — only what the user stated
-- Sensitive secrets (passwords, auth tokens, private keys, full payment data, government IDs)
-- Opinions the assistant expressed unless the user explicitly agreed with them
-
-Current memory index:
-\`\`\`
-{INDEX}
-\`\`\`
-
-**Key principle: Create a NEW file for each distinct topic rather than cramming unrelated facts into one file.** Organize files into folders by domain (e.g. health/, work/, personal/) and create topic-specific files within them (e.g. health/allergies.md, work/role.md). The folder structure should emerge naturally from the topics discussed.
-
-Instructions:
-1. Read the conversation below and identify facts the user explicitly stated.
-2. If a matching file already exists in the index, use read_file first to avoid duplicates.
-3. If no relevant file exists yet, create_new_file directly.
-4. Use append_memory to add to existing files when the topic matches, or create_new_file for new topics.
-5. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DD"
-6. Source values:
-   - source=user_statement — the user directly said this. This is the PRIMARY source. Use it for the vast majority of saved facts.
-   - source=llm_infer — use ONLY when combining multiple explicit user statements into an obvious conclusion (e.g. user said "I work at Acme" and "Acme is in SF" → "Works in SF"). Never use this to guess, extrapolate, or fill in gaps. When in doubt, do not save.
-7. Confidence: high for direct user statements, medium for llm_infer. Never save low-confidence items.
-8. You may optionally add tier=working for clearly short-term or in-progress context. If you are unsure, omit tier and just save the fact.
-9. Facts worth saving: allergies, health conditions, location, job/role, tech stack, pets, family members, durable preferences, and active plans — but ONLY if the user explicitly mentioned them.
-10. If a fact is time-sensitive, include date context in the text. You may optionally add review_at or expires_at.
-11. If nothing new is worth remembering, simply stop without calling any write tools. Saving nothing is better than saving something wrong.
-
-Rules:
-- One file per distinct topic. Do NOT put unrelated facts in the same file.
-- Create new files freely — it is better to have many focused files than one bloated file.
-- Use update_memory only if a fact is now stale or contradicted.
-- When a new explicit user statement contradicts an older one on the same topic, prefer the newer statement. If a user statement conflicts with an inference, the user statement always wins.
-- If a conflict is ambiguous, preserve both versions rather than deleting one.
-- Do not skip obvious facts just because the schema supports extra metadata.
-- Content should be raw facts only — no filler commentary.`;
-
-
 class MemoryIngester {
     constructor({ backend, bulletIndex, llmClient, model, onToolCall }) {
         this._backend = backend;
@@ -177,19 +132,28 @@ class MemoryIngester {
         const onToolCall = this._onToolCall;
         if (!messages || messages.length === 0) return { status: 'skipped', writeCalls: 0 };
 
-        const conversationText = this._buildConversationText(messages);
+        // Support both `mode` and legacy `extractionMode`
+        const mode = options.mode || options.extractionMode || 'conversation';
+        const isDocument = mode === 'document';
+        const conversationText = isDocument
+            ? this._buildDocumentText(messages)
+            : this._buildConversationText(messages);
         if (!conversationText) return { status: 'skipped', writeCalls: 0 };
 
         await this._backend.init();
         const index = await this._backend.getTree() || '';
 
-        const systemPrompt = EXTRACTION_SYSTEM_PROMPT
-            .replace('{INDEX}', index);
+        const { ingestionPrompt } = resolvePromptSet(mode);
+        const systemPrompt = ingestionPrompt.replace('{INDEX}', index);
         const toolExecutors = createExtractionExecutors(this._backend, {
-            normalizeContent: (content, path) => this._normalizeGeneratedContent(content, path, updatedAt),
-            mergeWithExisting: (existing, incoming, path) => this._mergeWithExisting(existing, incoming, path, updatedAt),
+            normalizeContent: (content, path) => this._normalizeGeneratedContent(content, path, updatedAt, isDocument),
+            mergeWithExisting: (existing, incoming, path) => this._mergeWithExisting(existing, incoming, path, updatedAt, isDocument),
             refreshIndex: (path) => this._bulletIndex.refreshPath(path)
         });
+
+        const userMessage = isDocument
+            ? `Document content:\n\`\`\`\n${conversationText}\n\`\`\``
+            : `Conversation:\n\`\`\`\n${conversationText}\n\`\`\``;
 
         let toolCallLog;
         try {
@@ -200,10 +164,10 @@ class MemoryIngester {
                 toolExecutors,
                 messages: [
                     { role: 'system', content: systemPrompt },
-                    { role: 'user', content: `Conversation:\n\`\`\`\n${conversationText}\n\`\`\`` }
+                    { role: 'user', content: userMessage }
                 ],
                 maxIterations: 12,
-                maxOutputTokens: 500,
+                maxOutputTokens: isDocument ? 4000 : 500,
                 temperature: 0,
                 onToolCall: (name, args, result) => {
                     onToolCall?.(name, args, result);
@@ -232,21 +196,33 @@ class MemoryIngester {
         return text.trim();
     }
 
-    _normalizeGeneratedContent(content, path, updatedAt) {
+    _buildDocumentText(messages) {
+        // For documents, concatenate content blocks without role labels.
+        // Multiple messages are treated as sections of the same document.
+        return messages
+            .map(m => (m.content || '').trim())
+            .filter(Boolean)
+            .join('\n\n')
+            .slice(0, MAX_CONVERSATION_CHARS);
+    }
+
+    _normalizeGeneratedContent(content, path, updatedAt, isDocument = false) {
         const incomingBullets = parseBullets(content);
         if (incomingBullets.length === 0) {
             return content;
         }
 
         const defaultTopic = inferTopicFromPath(path);
-        const normalized = incomingBullets.map((bullet) =>
-            ensureBulletMetadata({ ...bullet, updatedAt: null }, { defaultTopic, updatedAt })
-        );
+        const normalized = incomingBullets.map((bullet) => {
+            const b = ensureBulletMetadata({ ...bullet, updatedAt: null }, { defaultTopic, updatedAt });
+            if (isDocument && b.source === 'user_statement') b.source = 'document';
+            return b;
+        });
         const compacted = compactBullets(normalized, { defaultTopic, maxActivePerTopic: 1000 });
         return renderCompactedDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
     }
 
-    _mergeWithExisting(existing, incoming, path, updatedAt) {
+    _mergeWithExisting(existing, incoming, path, updatedAt, isDocument = false) {
         const existingText = String(existing || '');
         const incomingText = String(incoming || '');
         const defaultTopic = inferTopicFromPath(path);
@@ -254,7 +230,11 @@ class MemoryIngester {
         const existingBullets = parseBullets(existingText)
             .map((bullet) => ensureBulletMetadata(bullet, { defaultTopic }));
         const incomingBullets = parseBullets(incomingText)
-            .map((bullet) => ensureBulletMetadata({ ...bullet, updatedAt: null }, { defaultTopic, updatedAt }));
+            .map((bullet) => {
+                const b = ensureBulletMetadata({ ...bullet, updatedAt: null }, { defaultTopic, updatedAt });
+                if (isDocument && b.source === 'user_statement') b.source = 'document';
+                return b;
+            });
 
         if (incomingBullets.length === 0) {
             return existingText

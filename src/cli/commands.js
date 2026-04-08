@@ -136,6 +136,8 @@ export async function importCmd(positionals, flags, mem, config, { showProgress 
     const source = positionals[0];
     let conversations;
 
+    let extractionMode = 'conversation';
+
     if (source === '-' || (!source && !process.stdin.isTTY)) {
         conversations = parseConversations(await readStdin(), flags);
     } else if (source) {
@@ -144,8 +146,10 @@ export async function importCmd(positionals, flags, mem, config, { showProgress 
             const files = await readMarkdownDir(source);
             if (files.length === 0) throw new Error(`No .md files found in ${source}`);
             conversations = parseMarkdownFiles(files);
+            extractionMode = 'document';
         } else {
             conversations = parseConversations(await readFile(source, 'utf-8'), flags);
+            if (flags.format === 'markdown') extractionMode = 'document';
         }
     } else {
         throw new Error('Usage: memory import <file|dir|->');
@@ -166,9 +170,12 @@ export async function importCmd(positionals, flags, mem, config, { showProgress 
             process.stderr.write(`\nImporting "${label}"\n`);
         }
 
-        const result = await mem.ingest(conv.messages, { updatedAt: conv.updatedAt });
+        const result = await mem.ingest(conv.messages, { updatedAt: conv.updatedAt, extractionMode });
+        if (result.status === 'error') {
+            process.stderr.write(`  ⚠ error: ${result.error}\n`);
+        }
         totalWriteCalls += result.writeCalls || 0;
-        results.push({ session: label, messages: conv.messages.length, writeCalls: result.writeCalls });
+        results.push({ session: label, messages: conv.messages.length, writeCalls: result.writeCalls, error: result.error });
     }
 
     return { status: 'imported', sessions: results.length, totalWriteCalls, details: results };

@@ -27,7 +27,7 @@ memory login
 
 This walks you through your provider, model, API key, and where to store your memory folder.
 
-Supports OpenAI, Anthropic, Tinfoil, and OpenAI-compatible endpoints. Your config is saved to `~/.nanomem/config.json`, and your memory lives in `~/.memory/` by default as plain markdown files.
+Supports OpenAI, Anthropic, Tinfoil, OpenRouter, and any OpenAI-compatible endpoint. Your config is saved to `~/.nanomem/config.json`, and your memory lives in `~/.memory/` by default as plain markdown files.
 
 Once you're set up, import the history or notes you want `nanomem` to organize:
 
@@ -103,6 +103,19 @@ Storage:
 - **Directory** — pass a folder to import all `.md` files recursively
 - Pipe from stdin: `echo '[{"role":"user","content":"I like cats"}]' | memory import -`
 
+#### Conversation vs Document mode
+
+Import uses two different extraction strategies depending on the source:
+
+- **Conversation mode** (default for `.json` and plain text) — strict extraction: only saves facts the user explicitly stated. Good for chat history.
+- **Document mode** (auto-detected for directories and `--format markdown`) — relaxed extraction: reads documents as reference material and extracts facts, skills, and patterns that are clearly supported by the content. Good for notes, READMEs, and knowledge bases.
+
+```bash
+memory import conversations.json          # conversation mode (auto)
+memory import ./notes/                    # document mode (auto, directory)
+memory import my-notes.md --format markdown  # document mode (explicit flag)
+```
+
 ### Flags and Overrides
 
 Most users only need `memory login`. These flags are mainly for one-off overrides, agents, and scripts:
@@ -110,14 +123,14 @@ Most users only need `memory login`. These flags are mainly for one-off override
 ```
 --api-key <key>         LLM API key
 --model <model>         Model ID
---provider <name>       Provider: openai | anthropic | tinfoil | custom
+--provider <name>       Provider: openai | anthropic | tinfoil | openrouter | custom
 --base-url <url>        Custom API endpoint
 --storage <type>        Storage backend: filesystem | ram | indexeddb (default: filesystem)
 --path <dir>            Storage directory (default: ~/.memory)
 --json                  Force JSON output
 ```
 
-Environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TINFOIL_API_KEY`) work as fallbacks if you haven't run `memory login`. The generic `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`, and `LLM_PROVIDER` also work as fallbacks.
+Environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TINFOIL_API_KEY`, `OPENROUTER_API_KEY`) work as fallbacks if you haven't run `memory login`. The generic `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`, and `LLM_PROVIDER` also work as fallbacks.
 
 Resolution order (highest wins): **CLI flags > config file > env vars > defaults**
 
@@ -143,6 +156,11 @@ await memory.ingest([
     { role: 'user', content: 'I just moved to San Francisco' },
     { role: 'assistant', content: 'Welcome to SF!' },
 ]);
+
+// Ingest a document (notes, README, article) — extracts facts and patterns
+await memory.ingest([
+    { role: 'user', content: markdownContent },
+], { extractionMode: 'document' });
 
 // Retrieve relevant context for a query
 const result = await memory.retrieve('Where do I live?');

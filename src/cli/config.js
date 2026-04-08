@@ -40,10 +40,12 @@ export async function writeConfigFile(data) {
 // ─── Provider presets ───────────────────────────────────────────
 
 const PRESETS = {
-    tinfoil: { envKey: 'TINFOIL_API_KEY', baseUrl: 'https://inference.tinfoil.sh/v1', model: 'kimi-k2-5' },
-    openai: { envKey: 'OPENAI_API_KEY', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.4-mini' },
-    anthropic: { envKey: 'ANTHROPIC_API_KEY', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-6' },
-    custom: { envKey: null, baseUrl: null, model: null },
+    tinfoil:    { envKey: 'TINFOIL_API_KEY',    baseUrl: 'https://inference.tinfoil.sh/v1', model: 'kimi-k2-5' },
+    openai:     { envKey: 'OPENAI_API_KEY',     baseUrl: 'https://api.openai.com/v1',       model: 'gpt-5.4-mini' },
+    anthropic:  { envKey: 'ANTHROPIC_API_KEY',  baseUrl: 'https://api.anthropic.com',       model: 'claude-sonnet-4-6', isAnthropic: true },
+    openrouter: { envKey: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1',    model: 'openai/gpt-4o',
+                  headers: { 'HTTP-Referer': 'https://github.com/openanonymity/memory', 'X-Title': 'simple-memory' } },
+    custom:     { envKey: null, baseUrl: null, model: null },
 };
 
 // ─── Resolve config ─────────────────────────────────────────────
@@ -69,11 +71,12 @@ export async function resolveConfig(flags) {
     const apiKey = flags['api-key'] || fileConfig.apiKey || process.env.LLM_API_KEY || (preset.envKey && process.env[preset.envKey]) || null;
     const baseUrl = flags['base-url'] || fileConfig.baseUrl || process.env.LLM_BASE_URL || preset.baseUrl;
     const model = flags.model || fileConfig.model || process.env.LLM_MODEL || preset.model;
+    const headers = preset.headers || null;
     const storage = flags.storage || fileConfig.storage || 'filesystem';
     const rawPath = flags.path || fileConfig.storagePath || DEFAULT_STORAGE_PATH;
     const storagePath = rawPath.startsWith('~/') ? join(homedir(), rawPath.slice(2)) : rawPath;
 
-    return { apiKey, baseUrl, model, provider: providerName, storage, storagePath };
+    return { apiKey, baseUrl, model, headers, provider: providerName, isAnthropic: !!preset.isAnthropic, storage, storagePath };
 }
 
 // ─── Create a memory instance from resolved config ──────────────
@@ -99,7 +102,8 @@ export function createMemoryFromConfig(config, command, { onToolCall, onProgress
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
             model: config.model,
-            provider: config.provider,
+            provider: config.isAnthropic ? 'anthropic' : config.provider,
+            ...(config.headers ? { headers: config.headers } : {}),
         };
         if (onToolCall) opts.onToolCall = onToolCall;
         if (onProgress) opts.onProgress = onProgress;

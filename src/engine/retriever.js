@@ -176,7 +176,7 @@ class MemoryRetriever {
             ],
             terminalTool: 'assemble_context',
             maxIterations: 8,
-            maxOutputTokens: 500,
+            maxOutputTokens: 4000,
             temperature: 0,
             onToolCall: (name, args, result) => {
                 onProgress?.({ stage: 'tool_call', message: `Tool: ${name}`, tool: name, args, result });

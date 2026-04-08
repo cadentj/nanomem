@@ -22,10 +22,11 @@ const c = {
 // ─── Provider / model definitions ────────────────────────────────
 
 const PROVIDERS = [
-    { value: 'openai', label: 'OpenAI', desc: 'GPT-5.4 and variants' },
-    { value: 'anthropic', label: 'Anthropic', desc: 'Claude Sonnet & Opus' },
-    { value: 'tinfoil', label: 'Tinfoil', desc: 'Kimi, GPT-OSS, DeepSeek and more' },
-    { value: 'custom', label: 'Custom endpoint', desc: 'Any OpenAI-compatible API' },
+    { value: 'openai',      label: 'OpenAI',           desc: 'GPT-5.4 and variants' },
+    { value: 'anthropic',   label: 'Anthropic',        desc: 'Claude Sonnet & Opus' },
+    { value: 'tinfoil',     label: 'Tinfoil',          desc: 'Kimi, GPT-OSS, DeepSeek and more' },
+    { value: 'openrouter',  label: 'OpenRouter',       desc: 'Access 300+ models via one API' },
+    { value: 'custom',      label: 'Custom endpoint',  desc: 'Any OpenAI-compatible API' },
 ];
 
 const MODELS = {
@@ -39,9 +40,17 @@ const MODELS = {
         { value: 'claude-opus-4-6', label: 'claude-opus-4-6', desc: 'Most capable' },
     ],
     tinfoil: [
-        { value: 'kimi-k2-5', label: 'kimi-k2-5', desc: 'Kimi K2.5' },
-        { value: 'gpt-oss-120b', label: 'gpt-oss-120b', desc: 'Open-source GPT 120B' },
+        { value: 'kimi-k2-5',        label: 'kimi-k2-5',        desc: 'Kimi K2.5' },
+        { value: 'gpt-oss-120b',     label: 'gpt-oss-120b',     desc: 'Open-source GPT 120B' },
         { value: 'deepseek-r1-0528', label: 'deepseek-r1-0528', desc: 'DeepSeek R1' },
+    ],
+    openrouter: [
+        { value: 'openai/gpt-4o',                    label: 'openai/gpt-4o',                    desc: 'GPT-4o via OpenRouter' },
+        { value: 'anthropic/claude-sonnet-4-5',      label: 'anthropic/claude-sonnet-4-5',      desc: 'Claude Sonnet via OpenRouter' },
+        { value: 'google/gemini-2.5-flash',          label: 'google/gemini-2.5-flash',          desc: 'Gemini 2.5 Flash — fast & cheap' },
+        { value: 'moonshotai/kimi-k2.5',              label: 'moonshotai/kimi-k2.5',              desc: 'Kimi K2.5 via OpenRouter' },
+        { value: 'moonshotai/kimi-k2',               label: 'moonshotai/kimi-k2',               desc: 'Kimi K2 via OpenRouter' },
+        { value: 'deepseek/deepseek-r1-0528',        label: 'deepseek/deepseek-r1-0528',        desc: 'DeepSeek R1' },
     ],
 };
 
@@ -88,7 +97,7 @@ export async function loginInteractive() {
     }
 
     // Step 4: API key
-    const labels = { openai: 'OpenAI', anthropic: 'Anthropic', tinfoil: 'Tinfoil', custom: 'API' };
+    const labels = { openai: 'OpenAI', anthropic: 'Anthropic', tinfoil: 'Tinfoil', openrouter: 'OpenRouter', custom: 'API' };
     const apiKey = await promptSecret(`${labels[provider]} key`);
 
     // Step 5: Storage path
