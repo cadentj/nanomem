@@ -34,7 +34,7 @@ const OPTIONS = {
     'session-id':    { type: 'string' },
     'session-title': { type: 'string' },
     'confirm':       { type: 'boolean', default: false },
-    'render-markdown': { type: 'boolean', default: false },
+    'render': { type: 'boolean', default: false },
 };
 
 const COMMAND_MAP = {

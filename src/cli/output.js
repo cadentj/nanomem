@@ -185,7 +185,7 @@ function highlightQuery(text, query) {
 function maybeRenderMarkdown(text, flags = {}) {
     if (!text) return text;
     if (!process.stdout.isTTY) return text;
-    if (!flags['render-markdown']) return text;
+    if (!flags['render']) return text;
     return renderMarkdown(text);
 }
 

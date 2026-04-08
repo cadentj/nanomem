@@ -55,7 +55,7 @@ Retrieve memory later:
 
 ```bash
 nanomem retrieve "what are my hobbies?"
-nanomem retrieve "what are my hobbies?" --render-markdown
+nanomem retrieve "what are my hobbies?" --render
 ```
 
 Compact and clean up memory:
@@ -157,7 +157,7 @@ nanomem export --format zip
 nanomem status
 ```
 
-For terminal use, `--render-markdown` will format markdown-heavy output like `read` and `retrieve` into a more readable ANSI-rendered view while leaving `--json` and piped output unchanged.
+For terminal use, `--render` will format markdown-heavy output like `read` and `retrieve` into a more readable ANSI-rendered view while leaving `--json` and piped output unchanged.
 
 ## Import formats
 
