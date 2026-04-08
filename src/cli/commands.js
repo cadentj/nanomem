@@ -11,6 +11,7 @@ import { isChatGptExport, parseChatGptExport } from '../imports/chatgpt.js';
 import { parseMarkdownFiles } from '../imports/markdown.js';
 import { loginInteractive } from './auth.js';
 import { writeConfigFile, CONFIG_PATH } from './config.js';
+import { createSpinner } from './spinner.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -132,7 +133,7 @@ export async function retrieve(positionals, flags, mem) {
     return result;
 }
 
-export async function importCmd(positionals, flags, mem, config, { showProgress } = {}) {
+export async function importCmd(positionals, flags, mem, config, { showProgress, spinnerHolder } = {}) {
     const source = positionals[0];
     let conversations;
 
@@ -160,26 +161,38 @@ export async function importCmd(positionals, flags, mem, config, { showProgress 
     let totalWriteCalls = 0;
     const results = [];
 
+    const isTTY = process.stderr.isTTY;
+    const c = isTTY ? { green: '\x1b[32m', yellow: '\x1b[33m', dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m', gray: '\x1b[90m' }
+                    : { green: '', yellow: '', dim: '', bold: '', reset: '', gray: '' };
+
     for (let i = 0; i < total; i++) {
         const conv = conversations[i];
         const label = conv.title || `conversation ${i + 1}`;
 
-        if (showProgress && total > 1) {
-            process.stderr.write(`\nImporting (${i + 1}/${total}) "${label}"\n`);
-        } else if (showProgress) {
-            process.stderr.write(`\nImporting "${label}"\n`);
+        if (showProgress) {
+            const counter = total > 1 ? `${c.gray}(${i + 1}/${total})${c.reset} ` : '';
+            process.stderr.write(`\n  ${counter}${c.bold}"${label}"${c.reset}\n`);
+        }
+
+        let spinner = null;
+        if (showProgress && isTTY) {
+            spinner = createSpinner('thinking…');
+            if (spinnerHolder) spinnerHolder.current = spinner;
         }
 
         const result = await mem.ingest(conv.messages, { updatedAt: conv.updatedAt, extractionMode });
+
+        if (spinnerHolder) spinnerHolder.current = null;
         if (showProgress) {
             if (result.status === 'error') {
-                process.stderr.write(`  ⚠ error: ${result.error}\n`);
+                spinner?.stop(`  ${c.yellow}⚠ ${result.error}${c.reset}`);
             } else if (result.writeCalls > 0) {
-                process.stderr.write(`  → ${result.writeCalls} write${result.writeCalls === 1 ? '' : 's'}\n`);
+                spinner?.stop(`  ${c.green}✓ ${result.writeCalls} fact${result.writeCalls === 1 ? '' : 's'} saved${c.reset}`);
             } else {
-                process.stderr.write(`  → nothing to save\n`);
+                spinner?.stop(`  ${c.dim}– nothing to save${c.reset}`);
             }
         }
+
         totalWriteCalls += result.writeCalls || 0;
         results.push({ session: label, messages: conv.messages.length, writeCalls: result.writeCalls, error: result.error });
     }
@@ -300,6 +313,66 @@ export async function status(positionals, flags, mem, config) {
         files: files.length,
         directories: [...dirs].sort(),
     };
+}
+
+export async function tree(positionals, flags, mem, config) {
+    await mem.init();
+    const all = await mem.storage.exportAll();
+    const files = all
+        .filter(f => !f.path.endsWith('_tree.md'))
+        .sort((a, b) => a.path.localeCompare(b.path));
+
+    if (files.length === 0) {
+        return { treeLines: [] };
+    }
+
+    // Group by top-level directory
+    const grouped = new Map(); // dir → [file]
+    for (const f of files) {
+        const slash = f.path.indexOf('/');
+        const dir = slash !== -1 ? f.path.slice(0, slash) : '';
+        const name = slash !== -1 ? f.path.slice(slash + 1) : f.path;
+        if (!grouped.has(dir)) grouped.set(dir, []);
+        grouped.get(dir).push({ ...f, name });
+    }
+
+    const isTTY = process.stdout.isTTY;
+    const c = isTTY ? {
+        reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
+        cyan: '\x1b[36m', green: '\x1b[32m', gray: '\x1b[90m', yellow: '\x1b[33m',
+    } : Object.fromEntries(['reset','bold','dim','cyan','green','gray','yellow'].map(k => [k, '']));
+
+    const lines = [];
+    lines.push('');
+    lines.push(`  ${c.bold}Memory${c.reset}  ${c.dim}${config.storagePath}${c.reset}`);
+    lines.push('');
+
+    const dirs = [...grouped.keys()].sort();
+    for (const dir of dirs) {
+        const entries = grouped.get(dir);
+
+        if (dir) {
+            lines.push(`  ${c.cyan}${dir}/${c.reset}`);
+        }
+
+        const prefix = dir ? '  ' : '';
+        for (let i = 0; i < entries.length; i++) {
+            const f = entries[i];
+            const isLast = i === entries.length - 1;
+            const branch = entries.length === 1 ? '──' : isLast ? '└─' : '├─';
+            const count = f.itemCount != null ? `${c.green}${String(f.itemCount).padStart(3)} facts${c.reset}` : '';
+            const hint  = f.oneLiner ? `  ${c.dim}${f.oneLiner.slice(0, 60)}${f.oneLiner.length > 60 ? '…' : ''}${c.reset}` : '';
+            const fname = f.name.replace(/\.md$/, '');
+            lines.push(`  ${prefix}${c.gray}${branch}${c.reset} ${c.bold}${fname}${c.reset}  ${count}${hint}`);
+        }
+        lines.push('');
+    }
+
+    const totalFacts = files.reduce((n, f) => n + (f.itemCount || 0), 0);
+    lines.push(`  ${c.dim}${files.length} file${files.length === 1 ? '' : 's'}  ·  ${totalFacts} facts total${c.reset}`);
+    lines.push('');
+
+    return { treeLines: lines };
 }
 
 export async function login(positionals, flags, mem, config) {

@@ -2,6 +2,34 @@
  * CLI output formatting — JSON for pipes, human-readable for terminals.
  */
 
+// ─── ANSI helpers ─────────────────────────────────────────────────
+
+const c = {
+    reset:  '\x1b[0m',
+    bold:   '\x1b[1m',
+    dim:    '\x1b[2m',
+    cyan:   '\x1b[36m',
+    green:  '\x1b[32m',
+    red:    '\x1b[31m',
+    yellow: '\x1b[33m',
+    white:  '\x1b[37m',
+    gray:   '\x1b[90m',
+};
+
+function col(code, text) {
+    if (!process.stdout.isTTY) return text;
+    return `${code}${text}${c.reset}`;
+}
+
+const dim    = t => col(c.dim, t);
+const bold   = t => col(c.bold, t);
+const cyan   = t => col(c.cyan, t);
+const green  = t => col(c.green, t);
+const red    = t => col(c.red, t);
+const gray   = t => col(c.gray, t);
+
+// ─── Public ───────────────────────────────────────────────────────
+
 export function formatOutput(result, flags) {
     if (flags.json || !process.stdout.isTTY) {
         return JSON.stringify(result, null, 2);
@@ -15,7 +43,7 @@ function formatHuman(result) {
 
     // retrieve → print assembled context directly
     if (result.assembledContext != null) {
-        return result.assembledContext || 'No relevant context found.';
+        return result.assembledContext || dim('No relevant context found.');
     }
 
     // read → print content directly
@@ -26,115 +54,124 @@ function formatHuman(result) {
     // ls → list files and dirs
     if (result.files && result.dirs) {
         const lines = [];
-        for (const d of result.dirs) lines.push(d + '/');
-        for (const f of result.files) lines.push(f);
-        return lines.join('\n') || '(empty)';
+        for (const d of result.dirs)  lines.push(cyan(d + '/'));
+        for (const f of result.files) lines.push(gray('  ') + f);
+        return lines.join('\n') || dim('(empty)');
+    }
+
+    // tree
+    if (result.treeLines != null) {
+        return result.treeLines.join('\n') || dim('(empty)');
     }
 
     // status → grouped display
     if ('provider' in result && 'storagePath' in result) {
-        const dirs = result.directories?.length ? result.directories.join(', ') : '(none)';
         return [
-            '  LLM',
-            `    Provider      ${result.provider}`,
-            `    Model         ${result.model}`,
-            `    Base URL      ${result.baseUrl}`,
             '',
-            '  Storage',
-            `    Backend       ${result.storage}`,
-            `    Path          ${result.storagePath}`,
-            `    Config        ${result.configFile}`,
-            `    Files         ${result.files}`,
-            `    Directories   ${dirs}`,
+            `  ${bold('LLM')}`,
+            row('Provider',    result.provider),
+            row('Model',       result.model),
+            row('Base URL',    result.baseUrl),
+            '',
+            `  ${bold('Storage')}`,
+            row('Backend',     result.storage),
+            row('Path',        result.storagePath),
+            row('Config',      result.configFile),
+            row('Files',       String(result.files)),
+            row('Directories', result.directories?.length ? result.directories.join(', ') : '(none)'),
+            '',
         ].join('\n');
     }
 
     // search results
     if (Array.isArray(result)) {
-        if (result.length === 0) return 'No results.';
+        if (result.length === 0) return dim('No results.');
         const query = result._query || '';
         return result.map(r => {
             if (!r.path) return JSON.stringify(r);
             const matchLines = (r.lines || [])
                 .map(line => '  ' + highlightQuery(line, query))
                 .join('\n');
-            return `\x1b[1m${r.path}\x1b[0m\n${matchLines}`;
+            return `${bold(r.path)}\n${matchLines}`;
         }).join('\n\n');
     }
 
-    // Status actions
+    // status actions
     if (result.status) return formatAction(result);
 
-
-    // Generic object → key: value
+    // generic object → key: value
     const pad = Math.max(...Object.keys(result).map(k => k.length));
-    const lines = [];
-    for (const [k, v] of Object.entries(result)) {
-        lines.push(`  ${k.padEnd(pad)}   ${Array.isArray(v) ? v.join(', ') : v}`);
-    }
-    return lines.join('\n');
+    return Object.entries(result)
+        .map(([k, v]) => row(k.padEnd(pad), Array.isArray(v) ? v.join(', ') : String(v)))
+        .join('\n');
 }
 
 function formatAction(result) {
     switch (result.status) {
         case 'initialized':
-            return lines('\u2713 Memory initialized', [
+            return section(green('✓ Memory initialized'), [
                 ['Backend', result.storage],
-                ['Path', result.path],
+                ['Path',    result.path],
             ]);
         case 'written':
-            return `\u2713 Written to ${result.path}`;
+            return green(`✓ Written to ${result.path}`);
         case 'deleted':
-            return `\u2713 Deleted ${result.path}`;
+            return green(`✓ Deleted ${result.path}`);
         case 'compacted':
-            return '\u2713 Memory compacted';
+            return green('✓ Memory compacted');
         case 'processed':
-            return lines('\u2713 Facts extracted', [
+            return section(green('✓ Facts extracted'), [
                 ['Files updated', result.writeCalls],
             ]);
         case 'skipped':
-            return '\u2013 Nothing to extract (conversation too short)';
+            return dim('– Nothing to extract (conversation too short)');
         case 'imported':
-            return lines('\u2713 Chat history imported', [
-                ['Sessions', result.sessions],
+            return section(green('✓ Chat history imported'), [
+                ['Sessions',      result.sessions],
                 ['Files updated', result.totalWriteCalls],
             ]);
         case 'exported':
-            return lines('\u2713 Memory exported', [
-                ['Files', result.files],
+            return section(green('✓ Memory exported'), [
+                ['Files',  result.files],
                 ['Format', result.format],
-                ['Path', result.path],
+                ['Path',   result.path],
             ]);
         case 'cleared':
-            return lines('\u2713 Memory cleared', [
+            return section(green('✓ Memory cleared'), [
                 ['Files deleted', result.filesDeleted],
-                ['Path', result.path],
+                ['Path',         result.path],
             ]);
         case 'logged_in':
-            return lines('\u2713 Logged in', [
+            return section(green('✓ Logged in'), [
                 ['Provider', result.provider],
                 ['Config',   result.configFile],
             ]);
         case 'logged_in_interactive':
             return null; // already printed by the interactive prompt
         case 'error':
-            return `\u2717 Extraction failed: ${result.error || 'unknown error'}`;
+            return red(`✗ Extraction failed: ${result.error || 'unknown error'}`);
         default:
-            return `\u2713 ${result.status}`;
+            return green(`✓ ${result.status}`);
     }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+function row(key, value) {
+    return `    ${dim(key.padEnd(14))}  ${value}`;
+}
+
+function section(heading, rows) {
+    if (!rows || rows.length === 0) return heading;
+    const pad = Math.max(...rows.map(([k]) => String(k).length));
+    const detail = rows
+        .map(([k, v]) => `    ${dim(String(k).padEnd(pad))}   ${bold(String(v ?? ''))}`)
+        .join('\n');
+    return `${heading}\n\n${detail}`;
 }
 
 function highlightQuery(text, query) {
     if (!query) return text;
     const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return text.replace(re, '\x1b[33;1m$1\x1b[0m');
-}
-
-function lines(heading, rows) {
-    if (!rows || rows.length === 0) return heading;
-    const pad = Math.max(...rows.map(([k]) => k.length));
-    const detail = rows
-        .map(([k, v]) => `    ${k.padEnd(pad)}   ${Array.isArray(v) ? v.join(', ') : v}`)
-        .join('\n');
-    return `${heading}\n\n${detail}`;
+    return text.replace(re, `\x1b[33;1m$1\x1b[0m`);
 }

@@ -150,6 +150,7 @@ await memory.compact();
 ```bash
 nanomem import <file|dir|->
 nanomem retrieve <query> [--context <file>]
+nanomem tree
 nanomem compact
 nanomem export --format zip
 nanomem status

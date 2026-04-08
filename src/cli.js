@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { resolveConfig, createMemoryFromConfig } from './cli/config.js';
 import { GLOBAL_HELP, COMMAND_HELP } from './cli/help.js';
 import { formatOutput } from './cli/output.js';
+import { createSpinner } from './cli/spinner.js';
 import * as commands from './cli/commands.js';
 
 // ─── Parse args ──────────────────────────────────────────────────
@@ -41,6 +42,7 @@ const COMMAND_MAP = {
     retrieve: commands.retrieve,
     import:   commands.importCmd,
     compact:  commands.compact,
+    tree:     commands.tree,
     ls:       commands.ls,
     read:     commands.read,
     write:    commands.write,
@@ -90,22 +92,23 @@ async function main() {
     const config = await resolveConfig(values);
     const memOpts = {};
 
-    // Wire progress for import/extract — show tool calls in real-time
+    // Wire progress for import/extract — spinner per session with live tool call updates
     const isImport = commandName === 'import' || commandName === 'extract';
     const showProgress = isImport && !values.json && process.stderr.isTTY;
+    const spinnerHolder = { current: null }; // shared mutable ref between onToolCall and import loop
     if (showProgress) {
+        const TOOL_LABELS = {
+            create_new_file: 'creating file',
+            append_memory:   'appending',
+            update_memory:   'updating',
+            archive_memory:  'archiving',
+            delete_memory:   'cleaning up',
+            read_file:       'reading',
+            list_files:      'scanning',
+        };
         memOpts.onToolCall = (name) => {
-            const TOOL_LABELS = {
-                create_new_file: 'creating file',
-                append_memory: 'writing memory',
-                update_memory: 'updating memory',
-                archive_memory: 'archiving',
-                delete_memory: 'cleaning up',
-                read_file: 'reading',
-                list_files: 'scanning',
-            };
             const label = TOOL_LABELS[name] || name;
-            process.stderr.write(`  \u2192 ${label}\n`);
+            spinnerHolder.current?.update(label + '…');
         };
     }
 
@@ -119,7 +122,17 @@ async function main() {
     }
 
     const mem = createMemoryFromConfig(config, commandName, memOpts);
-    const result = await handler(commandArgs, values, mem, config, { showProgress });
+
+    // Spinner for operations that give no other feedback
+    const useSpinner = !values.json && process.stderr.isTTY &&
+        (commandName === 'retrieve' || commandName === 'compact');
+    const spinner = useSpinner ? createSpinner(
+        commandName === 'retrieve' ? 'searching memory…' : 'compacting memory…'
+    ) : null;
+
+    const result = await handler(commandArgs, values, mem, config, { showProgress, spinnerHolder });
+
+    spinner?.stop();
 
     if (result != null) {
         const output = formatOutput(result, values);
