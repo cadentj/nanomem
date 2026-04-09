@@ -138,7 +138,7 @@ class MemoryIngester {
                     { role: 'user', content: userMessage }
                 ],
                 maxIterations: 12,
-                maxOutputTokens: isDocument ? 4000 : 1500,
+                maxOutputTokens: 4000,
                 temperature: 0,
                 onToolCall: (name, args, result) => {
                     onToolCall?.(name, args, result);
