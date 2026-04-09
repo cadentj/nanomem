@@ -12,6 +12,7 @@ import { parseMarkdownFiles } from '../imports/markdown.js';
 import { loginInteractive } from './auth.js';
 import { writeConfigFile, CONFIG_PATH } from './config.js';
 import { createSpinner } from './spinner.js';
+import { printFileDiff } from './diff.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -163,10 +164,10 @@ export async function add(positionals, flags, mem, config, { showProgress, spinn
     if (!input) throw new Error('Usage: memory add <text>');
 
     const conversations = parseConversations(input, flags);
-    return ingestConversations(conversations, 'conversation', mem, { showProgress, spinnerHolder, status: 'added' });
+    return ingestConversations(conversations, 'conversation', mem, { showProgress, spinnerHolder, status: 'added', showDiff: true });
 }
 
-async function ingestConversations(conversations, extractionMode, mem, { showProgress, spinnerHolder, status }) {
+async function ingestConversations(conversations, extractionMode, mem, { showProgress, spinnerHolder, status, showDiff = false }) {
     await mem.init();
 
     const total = conversations.length;
@@ -202,6 +203,11 @@ async function ingestConversations(conversations, extractionMode, mem, { showPro
                 spinner?.stop(`  ${c.green}✓ ${result.writeCalls} fact${result.writeCalls === 1 ? '' : 's'} saved${c.reset}`);
             } else {
                 spinner?.stop(`  ${c.dim}– nothing to save${c.reset}`);
+            }
+            if (showDiff && result.writes?.length) {
+                for (const { path, before, after } of result.writes) {
+                    printFileDiff(path, before, after);
+                }
             }
         }
 

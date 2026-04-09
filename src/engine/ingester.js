@@ -116,10 +116,12 @@ class MemoryIngester {
 
         const { ingestionPrompt } = resolvePromptSet(mode);
         const systemPrompt = ingestionPrompt.replace('{INDEX}', index);
+        const writes = [];
         const toolExecutors = createExtractionExecutors(this._backend, {
             normalizeContent: (content, path) => this._normalizeGeneratedContent(content, path, updatedAt, isDocument),
             mergeWithExisting: (existing, incoming, path) => this._mergeWithExisting(existing, incoming, path, updatedAt, isDocument),
-            refreshIndex: (path) => this._bulletIndex.refreshPath(path)
+            refreshIndex: (path) => this._bulletIndex.refreshPath(path),
+            onWrite: (path, before, after) => writes.push({ path, before, after }),
         });
 
         const userMessage = isDocument
@@ -153,7 +155,7 @@ class MemoryIngester {
         const writeTools = ['create_new_file', 'append_memory', 'update_memory', 'archive_memory', 'delete_memory'];
         const writeCalls = toolCallLog.filter(e => writeTools.includes(e.name));
 
-        return { status: 'processed', writeCalls: writeCalls.length };
+        return { status: 'processed', writeCalls: writeCalls.length, writes };
     }
 
     _buildConversationText(messages) {

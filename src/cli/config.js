@@ -1,8 +1,8 @@
 /**
  * CLI config resolution — flags + config file + env vars → createMemoryBank config.
  *
- * Config lives at ~/.nanomem/config.json (fixed location).
- * Memory data lives at ~/.memory by default (configurable via login or --path).
+ * Config lives at ~/.config/nanomem/config.json (fixed location).
+ * Memory data lives at ~/nanomem by default (configurable via login or --path).
  *
  * Priority (highest wins):
  *   CLI flags  >  config file  >  env vars  >  preset defaults
@@ -15,9 +15,9 @@ import { createMemoryBank } from '../index.js';
 
 // ─── Paths ──────────────────────────────────────────────────────
 
-export const CONFIG_DIR = join(homedir(), '.nanomem');
+export const CONFIG_DIR = join(homedir(), '.config', 'nanomem');
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
-export const DEFAULT_STORAGE_PATH = join(homedir(), '.memory');
+export const DEFAULT_STORAGE_PATH = join(homedir(), 'nanomem');
 
 // ─── Config file ────────────────────────────────────────────────
 

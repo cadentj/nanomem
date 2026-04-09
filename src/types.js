@@ -264,6 +264,7 @@
  * @property {(content: string, path: string) => string} [normalizeContent]
  * @property {(existing: string | null, incoming: string, path: string) => string} [mergeWithExisting]
  * @property {(path: string) => Promise<void>} [refreshIndex]
+ * @property {(path: string, before: string, after: string) => void} [onWrite]
  */
 
 /**

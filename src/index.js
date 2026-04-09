@@ -150,7 +150,7 @@ function _createBackend(storage, storagePath) {
         case 'indexeddb':
             return _asyncBackend(() => import('./backends/indexeddb.js').then(m => new m.IndexedDBStorage()));
         case 'filesystem':
-            return _asyncBackend(() => import('./backends/filesystem.js').then(m => new m.FileSystemStorage(storagePath || '.memory')));
+            return _asyncBackend(() => import('./backends/filesystem.js').then(m => new m.FileSystemStorage(storagePath || 'nanomem')));
         case 'ram':
         default:
             return new InMemoryStorage();

@@ -69,11 +69,11 @@ const RETRIEVAL_TOOLS = [
         type: 'function',
         function: {
             name: 'assemble_context',
-            description: 'Assemble the final memory context to attach to the user query. Call this when done selecting and reading files. The content you provide will be used as context for answering the user message.',
+            description: 'Synthesize and return the final answer to the user\'s query based on what you read. Do NOT paste raw file content — write a clear, direct answer in plain prose. You MUST call this when done, even if nothing relevant was found (pass an empty string).',
             parameters: {
                 type: 'object',
                 properties: {
-                    content: { type: 'string', description: 'The assembled memory context to attach to the query. Include relevant excerpts from the files you read.' }
+                    content: { type: 'string', description: 'A synthesized, human-readable answer to the query derived from the memory files. Write prose, not raw bullet dumps. If nothing relevant was found, pass an empty string.' }
                 },
                 required: ['content']
             }
@@ -94,7 +94,7 @@ Instructions:
 2. Use retrieve_file only when you need to search by keyword (e.g. "cooking", "Stanford") — it searches file contents, not paths.
 3. Use list_directory to see ALL files in a directory when the query relates to a broad domain (e.g. list "health" for any medicine/health query).
 4. Read at most ${MAX_FILES_TO_LOAD} files.
-5. When you've found relevant context, call assemble_context with curated excerpts.
+5. You MUST always finish by calling assemble_context — write a direct, synthesized answer in plain prose based on what you read. Do NOT paste raw bullet lists or file content. If the query is historical or comparative, reason over the facts and answer accordingly.
 6. If nothing is relevant, call assemble_context with an empty string.
 
 IMPORTANT — Domain-exhaustive retrieval:

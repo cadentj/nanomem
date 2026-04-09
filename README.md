@@ -41,7 +41,7 @@ Set up once:
 nanomem login
 ```
 
-This walks you through provider, model, API key, and where to store your memory. Config is saved to `~/.nanomem/config.json`. Filesystem memory lives in `~/.memory/` by default.
+This walks you through provider, model, API key, and where to store your memory. Config is saved to `~/.config/nanomem/config.json`. Filesystem memory lives in `~/nanomem/` by default.
 
 Import history or notes:
 

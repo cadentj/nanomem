@@ -30,7 +30,7 @@ Flags:
   --model <model>         Model ID
   --provider <name>       Provider: openai | anthropic | tinfoil | custom
   --base-url <url>        Custom API endpoint
-  --path <dir>            Storage directory (default: ~/.memory)
+  --path <dir>            Storage directory (default: ~/nanomem)
   --json                  Force JSON output
   --render                Render markdown for terminal output
   -h, --help              Show help

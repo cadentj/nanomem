@@ -60,7 +60,7 @@ export function createRetrievalExecutors(backend) {
  * @param {ExtractionExecutorHooks} [hooks]
  */
 export function createExtractionExecutors(backend, hooks = {}) {
-    const { normalizeContent, mergeWithExisting, refreshIndex } = hooks;
+    const { normalizeContent, mergeWithExisting, refreshIndex, onWrite } = hooks;
 
     return {
         read_file: async ({ path }) => {
@@ -74,6 +74,7 @@ export function createExtractionExecutors(backend, hooks = {}) {
             const normalized = normalizeContent ? normalizeContent(content, path) : content;
             await backend.write(path, normalized);
             if (refreshIndex) await refreshIndex(path);
+            onWrite?.(path, '', normalized);
             return JSON.stringify({ success: true, path });
         },
         append_memory: async ({ path, content }) => {
@@ -83,12 +84,15 @@ export function createExtractionExecutors(backend, hooks = {}) {
                 : (existing ? existing + '\n\n' + content : content);
             await backend.write(path, newContent);
             if (refreshIndex) await refreshIndex(path);
+            onWrite?.(path, existing ?? '', newContent);
             return JSON.stringify({ success: true, path, action: 'appended' });
         },
         update_memory: async ({ path, content }) => {
+            const before = await backend.read(path);
             const normalized = normalizeContent ? normalizeContent(content, path) : content;
             await backend.write(path, normalized);
             if (refreshIndex) await refreshIndex(path);
+            onWrite?.(path, before ?? '', normalized);
             return JSON.stringify({ success: true, path, action: 'updated' });
         },
         archive_memory: async ({ path, item_text }) => {
