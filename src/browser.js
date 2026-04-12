@@ -8,7 +8,6 @@
 
 import { createOpenAIClient } from './llm/openai.js';
 import { createAnthropicClient } from './llm/anthropic.js';
-import { createTinfoilClient } from './llm/tinfoil.js';
 import { MemoryBulletIndex } from './bullets/bulletIndex.js';
 import { MemoryRetriever } from './engine/retriever.js';
 import { MemoryIngester } from './engine/ingester.js';
@@ -165,7 +164,10 @@ function createBrowserLlmClient(llmConfig = /** @type {MemoryBankLLMConfig} */ (
         return createAnthropicClient({ apiKey, baseUrl, headers });
     }
     if (detectedProvider === 'tinfoil') {
-        return createTinfoilClient(llmConfig);
+        throw new Error(
+            'createMemoryBank(browser): Tinfoil provider requires the Node.js entry (src/index.js). ' +
+            'Use provider "openai" with baseUrl "https://inference.tinfoil.sh/v1" for browser builds.'
+        );
     }
     return createOpenAIClient({ apiKey, baseUrl, headers });
 }
