@@ -44,6 +44,7 @@ await esbuild.build({
     platform: 'browser',
     target: ['es2020'],
     outfile: path.join(vendorDir, 'tinfoil.browser.js'),
+    banner: { js: '// @ts-nocheck' },
     minify: false,
     define: {
         'process.env.NODE_ENV': '"production"',
