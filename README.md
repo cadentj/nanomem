@@ -237,4 +237,4 @@ OMF spec: [docs/omf.md](./docs/omf.md)
 
 ## License
 
-MIT
+This project is licensed under the MIT License.
