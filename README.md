@@ -41,7 +41,7 @@ Retrieval is only one part of memory. `nanomem` is built for the maintenance lay
 Install:
 
 ```bash
-npm i @openanonymity/nanomem
+npm install -g @openanonymity/nanomem
 ```
 
 Set up once:
