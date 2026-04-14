@@ -73,7 +73,7 @@ const T_APPEND_MEMORY = {
 const T_UPDATE_BULLETS = {
     type: 'function',
     function: {
-        name: 'update_bulletss',
+        name: 'update_bullets',
         description: 'Replace one or more bullet facts in an existing memory file in a single call. Each entry requires the exact existing fact text and its corrected replacement. Only matched bullets are changed — the rest of the file is untouched.',
         parameters: {
             type: 'object',
