@@ -55,8 +55,8 @@ This walks you through provider, model, API key, and where to store your memory.
 Add facts directly:
 
 ```bash
-nanomem add "I moved to Seattle and started a new job at Acme."
-nanomem update "Actually I moved to Portland, not Seattle."
+nanomem add "Mise just crossed 200 active users this week."
+nanomem update "Mise hit 250 users after the Indie Hackers post."
 ```
 
 Import history or notes:
@@ -77,8 +77,8 @@ nanomem retrieve "what are my hobbies?" --render
 Delete facts from memory:
 
 ```bash
-nanomem delete "I have a dog named Mochi"
-nanomem delete "I have a dog named Mochi" --deep
+nanomem delete "my old recipe scraping approach"
+nanomem delete "my old recipe scraping approach" --deep
 ```
 
 Compact and clean up memory:
