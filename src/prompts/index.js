@@ -1,15 +1,18 @@
 /**
- * Prompt set registry.
+ * Prompt registry for nanomem.
  *
  * Each mode provides an ingestionPrompt (and optionally others in future).
  * resolvePromptSet(mode) returns the full prompt set, falling back to 'conversation'.
  *
- * Adding a new mode: create src/prompt_sets/<mode>/ingestion.js, export ingestionPrompt,
- * then add it to PROMPT_SETS below.
+ * Adding a new mode: create the prompt in src/prompts/ingestion/<mode>.js or
+ * src/prompts/deletion/<mode>.js, then add it to PROMPT_SETS below.
  */
 
-import { ingestionPrompt as conversationIngestion, addPrompt, updatePrompt, deletePrompt, deepDeletePrompt } from './conversation/ingestion.js';
-import { ingestionPrompt as documentIngestion, addPrompt as documentAddPrompt, updatePrompt as documentUpdatePrompt, deletePrompt as documentDeletePrompt, deepDeletePrompt as documentDeepDeletePrompt } from './document/ingestion.js';
+import { ingestionPrompt as conversationIngestion, addPrompt, updatePrompt } from './ingestion/conversation.js';
+import { ingestionPrompt as documentIngestion, addPrompt as documentAddPrompt, updatePrompt as documentUpdatePrompt } from './ingestion/document.js';
+import { deletePrompt, deepDeletePrompt } from './deletion/conversation.js';
+import { deletePrompt as documentDeletePrompt, deepDeletePrompt as documentDeepDeletePrompt } from './deletion/document.js';
+import { retrievalPrompt, augmentAddendum, augmentCrafterPrompt } from './retrieval.js';
 
 /** @type {Record<string, { ingestionPrompt: string }>} */
 const PROMPT_SETS = {
@@ -37,3 +40,5 @@ export function resolvePromptSet(mode = 'conversation') {
 }
 
 export const AVAILABLE_MODES = Object.keys(PROMPT_SETS);
+
+export { retrievalPrompt, augmentAddendum, augmentCrafterPrompt };
