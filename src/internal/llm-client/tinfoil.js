@@ -1,10 +1,9 @@
 /**
  * Tinfoil SDK client with fail-closed attestation verification.
  *
- * In browser environments this loads the vendored browser bundle lazily.
- * In Node environments it imports the `tinfoil` package directly.
+ * Loads the `tinfoil` package lazily in both browser and Node environments.
  */
-/** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, MemoryBankLLMConfig, ToolCall } from '../types.js' */
+/** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, MemoryBankLLMConfig, ToolCall } from '../../types.js' */
 /**
  * @typedef {Error & { status?: number, retryable?: boolean, retryAfterMs?: number | null, _retryFinalized?: boolean }} ApiError
  */
@@ -25,34 +24,28 @@ const MAX_DELAY_MS = 2500;
 const DEFAULT_CONFIG_REPO = 'tinfoilsh/confidential-model-router';
 const DEFAULT_ENCLAVE_URL = 'https://inference.tinfoil.sh';
 
-let browserTinfoilModulePromise = null;
-let nodeTinfoilModulePromise = null;
+let tinfoilModulePromise = null;
 
-function isBrowserRuntime() {
-    return typeof window !== 'undefined' && typeof document !== 'undefined';
-}
-
-async function loadBrowserTinfoilModule() {
-    if (!browserTinfoilModulePromise) {
-        browserTinfoilModulePromise = import('../vendor/tinfoil.browser.js');
+/**
+ * Load TinfoilAI class. If a pre-loaded module is provided (e.g. a browser
+ * bundle), use it directly. Otherwise fall back to `import('tinfoil')`.
+ *
+ * @param {object} [providedModule] — pre-loaded tinfoil module (must export TinfoilAI)
+ */
+async function loadTinfoilAI(providedModule) {
+    if (providedModule) {
+        return providedModule.TinfoilAI || providedModule.default;
     }
-    return browserTinfoilModulePromise;
-}
 
-async function loadBrowserTinfoilAI() {
-    const mod = await loadBrowserTinfoilModule();
-    return mod.TinfoilAI || mod.default;
-}
-
-async function loadNodeTinfoilAI() {
-    if (!nodeTinfoilModulePromise) {
-        nodeTinfoilModulePromise = Function('s', 'return import(s)')('tinfoil');
+    if (!tinfoilModulePromise) {
+        tinfoilModulePromise = Function('s', 'return import(s)')('tinfoil');
     }
 
     let mod;
     try {
-        mod = await nodeTinfoilModulePromise;
+        mod = await tinfoilModulePromise;
     } catch (error) {
+        tinfoilModulePromise = null;
         if (error?.code === 'ERR_MODULE_NOT_FOUND' || String(error?.message || '').includes("Cannot find package 'tinfoil'")) {
             throw new Error('Missing dependency "tinfoil". Run `npm install` in the nanomem package first.');
         }
@@ -139,6 +132,7 @@ export function createTinfoilClient(options = /** @type {MemoryBankLLMConfig} */
         configRepo,
         attestationBundleURL,
         transport,
+        tinfoilModule,
     } = options;
 
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
@@ -148,12 +142,15 @@ export function createTinfoilClient(options = /** @type {MemoryBankLLMConfig} */
     }
 
     let clientPromise = null;
-    let browserClientPromise = null;
 
     async function ensureClient() {
         if (!clientPromise) {
             clientPromise = (async () => {
-                const TinfoilAI = await loadNodeTinfoilAI();
+                const TinfoilAI = await loadTinfoilAI(tinfoilModule);
+                if (typeof TinfoilAI !== 'function') {
+                    throw new Error('Tinfoil package does not export TinfoilAI.');
+                }
+
                 const client = new TinfoilAI({
                     bearerToken: apiKey,
                     ...(normalizedBaseUrl ? { baseURL: normalizedBaseUrl } : {}),
@@ -179,60 +176,9 @@ export function createTinfoilClient(options = /** @type {MemoryBankLLMConfig} */
         return clientPromise;
     }
 
-    async function ensureBrowserClient() {
-        if (!browserClientPromise) {
-            browserClientPromise = (async () => {
-                const TinfoilAI = await loadBrowserTinfoilAI();
-                if (typeof TinfoilAI !== 'function') {
-                    throw new Error('Vendored Tinfoil browser bundle does not export TinfoilAI.');
-                }
-
-                const client = new TinfoilAI({
-                    bearerToken: apiKey,
-                    ...(normalizedBaseUrl ? { baseURL: normalizedBaseUrl } : {}),
-                    ...(normalizedEnclaveUrl ? { enclaveURL: normalizedEnclaveUrl } : {}),
-                    ...(configRepo ? { configRepo } : { configRepo: DEFAULT_CONFIG_REPO }),
-                    ...(attestationBundleURL ? { attestationBundleURL } : {}),
-                    ...(transport ? { transport } : {}),
-                    dangerouslyAllowBrowser: true,
-                });
-
-                await client.ready();
-                const verification = await client.getVerificationDocument();
-                if (!verification?.securityVerified) {
-                    throw new Error(`Tinfoil attestation verification failed: ${formatVerificationSteps(verification)}`);
-                }
-
-                return client;
-            })().catch((error) => {
-                browserClientPromise = null;
-                throw error;
-            });
-        }
-
-        return browserClientPromise;
-    }
-
     async function createChatCompletion(params) {
         const body = buildRequestBody(params);
         const requestOptions = buildRequestOptions(headers);
-
-        if (isBrowserRuntime()) {
-            const response = await withRetry(async () => {
-                const client = await ensureBrowserClient();
-                return client.chat.completions.create(body, requestOptions);
-            }, 'chat completion request');
-
-            const choice = response?.choices?.[0] || {};
-            const message = choice.message || {};
-
-            return {
-                content: extractTextContent(message.content),
-                tool_calls: normalizeToolCalls(message.tool_calls),
-                finish_reason: choice.finish_reason,
-                usage: response?.usage || null,
-            };
-        }
 
         const response = await withRetry(async () => {
             const client = await ensureClient();
@@ -253,81 +199,6 @@ export function createTinfoilClient(options = /** @type {MemoryBankLLMConfig} */
     async function streamChatCompletion({ model, messages, tools, max_tokens, temperature, onDelta, onReasoning }) {
         const body = buildRequestBody({ model, messages, tools, max_tokens, temperature });
         const requestOptions = buildRequestOptions(headers);
-
-        if (isBrowserRuntime()) {
-            return withRetry(async () => {
-                const client = await ensureBrowserClient();
-                const stream = await client.chat.completions.create({
-                    ...body,
-                    stream: true,
-                }, requestOptions);
-
-                let content = '';
-                let sawStreamData = false;
-                let finishReason = null;
-                const toolCallAccumulator = new Map();
-
-                try {
-                    for await (const chunk of stream) {
-                        sawStreamData = true;
-
-                        const choice = chunk?.choices?.[0];
-                        if (!choice) continue;
-                        if (choice.finish_reason) finishReason = choice.finish_reason;
-
-                        const delta = choice.delta;
-                        if (!delta) continue;
-
-                        if (delta.content) {
-                            content += delta.content;
-                            onDelta?.(delta.content);
-                        }
-
-                        const reasoning = extractReasoningDelta(delta);
-                        if (reasoning) {
-                            onReasoning?.(reasoning);
-                        }
-
-                        if (delta.tool_calls) {
-                            for (const tc of delta.tool_calls) {
-                                const index = tc.index ?? 0;
-                                if (!toolCallAccumulator.has(index)) {
-                                    toolCallAccumulator.set(index, {
-                                        id: tc.id || '',
-                                        type: 'function',
-                                        function: { name: '', arguments: '' },
-                                    });
-                                }
-
-                                const acc = toolCallAccumulator.get(index);
-                                if (!acc) continue;
-                                if (tc.id) acc.id = tc.id;
-                                if (tc.function?.name) acc.function.name += tc.function.name;
-                                if (tc.function?.arguments) acc.function.arguments += tc.function.arguments;
-                            }
-                        }
-                    }
-                } catch (error) {
-                    if (!sawStreamData && isRetryableNetworkError(error)) {
-                        const retryError = /** @type {any} */ (asError(error));
-                        retryError.retryable = true;
-                        throw retryError;
-                    }
-                    throw error;
-                }
-
-                const tool_calls = [...toolCallAccumulator.entries()]
-                    .sort(([a], [b]) => a - b)
-                    .map(([, value]) => value);
-
-                return {
-                    content,
-                    tool_calls,
-                    finish_reason: finishReason || undefined,
-                    usage: null,
-                };
-            }, 'streaming chat completion');
-        }
 
         return withRetry(async () => {
             const client = await ensureClient();

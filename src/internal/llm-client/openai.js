@@ -6,7 +6,7 @@
  *
  * Uses `fetch` (built into Node 18+ and browsers).
  */
-/** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, ToolCall } from '../types.js' */
+/** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, ToolCall } from '../../types.js' */
 /**
  * @typedef {Error & { status?: number, retryable?: boolean, retryAfterMs?: number | null, _retryFinalized?: boolean }} ApiError
  */

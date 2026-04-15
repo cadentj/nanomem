@@ -6,7 +6,7 @@
  *
  * Uses `fetch` (built into Node 18+ and browsers).
  */
-/** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, LLMMessage, ToolCall, ToolDefinition } from '../types.js' */
+/** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, LLMMessage, ToolCall, ToolDefinition } from '../../types.js' */
 
 /**
  * @param {LLMClientOptions} [options]
