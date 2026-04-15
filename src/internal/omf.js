@@ -1,4 +1,4 @@
-/** @import { ExportRecord, OmfDocument, OmfImportOptions, OmfImportPreview, OmfImportResult, StorageFacade } from './types.js' */
+/** @import { ExportRecord, OmfDocument, OmfImportOptions, OmfImportPreview, OmfImportResult, StorageFacade } from '../types.js' */
 
 import {
     parseBullets,
@@ -9,7 +9,7 @@ import {
     compactBullets,
     renderCompactedDocument,
     normalizeFactText,
-} from './bullets/index.js';
+} from './format/index.js';
 
 const SUPPORTED_OMF_VERSIONS = ['1.0'];
 const DEFAULT_SOURCE_APP = 'nanomem';
