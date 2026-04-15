@@ -222,6 +222,10 @@ nanomem import my-notes.md --format markdown   # document mode (explicit)
 - `ram` for testing or ephemeral usage
 - custom backend objects for your own storage layer
 
+## Demo
+
+<video src="assets/nanomem_demo_compressed.mp4" width="100%" controls></video>
+
 ## Learn more
 
 Internals: [docs/memory-system.md](./docs/memory-system.md)

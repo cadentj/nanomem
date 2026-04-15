@@ -382,7 +382,7 @@ class MemoryRetriever {
         }
 
         try {
-            onProgress?.({ stage: 'retrieval', message: 'Reading memory and crafting a review prompt...' });
+            onProgress?.({ stage: 'retrieval', message: 'Retrieving memory...' });
             return /** @type {Promise<AugmentQueryResult | null>} */ (
                 this._toolCallingRetrieval(query, index, onProgress, conversationText, onModelText, { mode: 'augment' })
             );
