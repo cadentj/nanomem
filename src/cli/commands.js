@@ -5,7 +5,7 @@
 import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { serialize, toZip } from '../internal/portability.js';
-import { safeDateIso } from '../internal/format/normalize.js';
+import { safeDateTimeIso } from '../internal/format/normalize.js';
 import { extractSessionsFromOAFastchatExport } from '../internal/imports/oaFastchat.js';
 import { isChatGptExport, parseChatGptExport } from '../internal/imports/chatgpt.js';
 import { isClaudeExport, parseClaudeExport } from '../internal/imports/claude.js';
@@ -69,7 +69,7 @@ function parseConversations(input, flags) {
             return sessions.map(s => ({
                 title: s.session.title || s.session.id || 'untitled',
                 messages: s.conversation,
-                updatedAt: safeDateIso(s.session.updatedAt),
+                updatedAt: safeDateTimeIso(s.session.updatedAt),
             }));
         }
 

@@ -17,7 +17,7 @@ import {
     normalizeFactText,
     parseBullets,
     renderCompactedDocument,
-    todayIsoDate,
+    nowIsoDateTime,
 } from '../internal/format/index.js';
 import { trimRecentConversation } from '../internal/recentConversation.js';
 import { augmentCrafterPrompt } from '../prompts/retrieval.js';
@@ -400,7 +400,7 @@ export function createExtractionExecutors(backend, hooks = {}) {
 
             const parsed = parseBullets(before);
             const defaultTopic = inferTopicFromPath(path);
-            const effectiveUpdatedAt = updatedAt || todayIsoDate();
+            const effectiveUpdatedAt = updatedAt || nowIsoDateTime();
             let matchedCount = 0;
             const errors = [];
 

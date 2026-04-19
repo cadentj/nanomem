@@ -1,6 +1,6 @@
 /** @import { ImportDataItemResult, ImportDataOptions, ImportDataResult, MemoryBank, MemoryImportConversation, Message } from '../../types.js' */
 
-import { safeDateIso } from '../format/normalize.js';
+import { safeDateTimeIso } from '../format/normalize.js';
 import { extractSessionsFromOAFastchatExport } from './oaFastchat.js';
 import { isChatGptExport, parseChatGptExport } from './chatgpt.js';
 import { isClaudeExport, parseClaudeExport } from './claude.js';
@@ -256,7 +256,7 @@ function normalizeTitle(value) {
  */
 function normalizeUpdatedAt(value) {
     if (value == null || value === '') return null;
-    return safeDateIso(value);
+    return safeDateTimeIso(value);
 }
 
 /**

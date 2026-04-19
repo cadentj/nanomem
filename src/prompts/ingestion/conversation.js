@@ -24,7 +24,7 @@ Do NOT save:
 - Transient details (greetings, one-off questions with no lasting answer)
 - Sensitive secrets (passwords, tokens, keys)
 
-Bullet format: "- Fact text | topic=topic-name | source=user_statement | confidence=high | updated_at=YYYY-MM-DD"
+Bullet format: "- Fact text | topic=topic-name | source=user_statement | confidence=high | updated_at=YYYY-MM-DDTHH:MM"
 
 If nothing new is worth saving, stop without calling any tools.`;
 
@@ -49,7 +49,7 @@ Rules:
 - Do not touch any other bullets in the file.
 - Pass old_fact exactly as it appears in the file (including pipe-delimited metadata is fine).
 - Pass new_fact as plain text only — no metadata.
-- When appending or creating, use this bullet format: "- Fact text | topic=topic-name | source=user_statement | confidence=high | updated_at=YYYY-MM-DD"
+- When appending or creating, use this bullet format: "- Fact text | topic=topic-name | source=user_statement | confidence=high | updated_at=YYYY-MM-DDTHH:MM"
 
 If nothing new or changed is worth saving, stop without calling any tools.`;
 
@@ -79,7 +79,7 @@ Instructions:
 2. Do not read files before writing. The memory index is sufficient to decide where to append. Only read a file if the index entry is ambiguous and you need the exact current content to avoid duplicating a fact.
 3. If no relevant file exists yet, create_new_file directly.
 4. Default to append_memory when an existing file covers the same domain or a closely related topic. Only use create_new_file when no existing file is thematically close.
-5. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DD"
+5. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DDTHH:MM"
 6. Source values:
    - source=user_statement — the user directly said this. This is the PRIMARY source. Use it for the vast majority of saved facts.
    - source=llm_infer — use ONLY when combining multiple explicit user statements into an obvious conclusion (e.g. user said "I work at Acme" and "Acme is in SF" → "Works in SF"). Never use this to guess, extrapolate, or fill in gaps. When in doubt, do not save.

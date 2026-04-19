@@ -19,6 +19,29 @@ export function todayIsoDate() {
     return new Date().toISOString().slice(0, 10);
 }
 
+/** @returns {string} YYYY-MM-DDTHH:MM in local time */
+export function nowIsoDateTime() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * @param {string | number | null | undefined} value
+ * @returns {string | null} YYYY-MM-DDTHH:MM in local time or null
+ */
+export function safeDateTimeIso(value) {
+    if (!value) return null;
+    // Date-only strings (YYYY-MM-DD) are parsed as UTC midnight by JS — append time to force local interpretation.
+    const input = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? `${value}T00:00:00`
+        : value;
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) return null;
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * @param {string} path
  * @returns {string}
@@ -189,7 +212,7 @@ export function inferTierFromBullet(bullet, fallback = 'long_term') {
  */
 export function ensureBulletMetadata(bullet, options = {}) {
     const fallbackTopic = normalizeTopic(options.defaultTopic || 'general');
-    const fallbackUpdatedAt = options.updatedAt || todayIsoDate();
+    const fallbackUpdatedAt = options.updatedAt || nowIsoDateTime();
     const inferredTier = inferTierFromBullet(bullet, options.defaultTier || 'long_term');
     const preferredTier = bullet?.explicitTier ? bullet?.tier : inferredTier;
     const fallbackTier = normalizeTier(options.defaultTier || preferredTier || bullet?.tier || 'long_term');
@@ -201,7 +224,7 @@ export function ensureBulletMetadata(bullet, options = {}) {
     return {
         text: String(bullet?.text || '').trim(),
         topic: normalizeTopic(bullet?.topic || fallbackTopic, fallbackTopic),
-        updatedAt: safeDateIso(bullet?.updatedAt) || fallbackUpdatedAt,
+        updatedAt: safeDateTimeIso(bullet?.updatedAt) || fallbackUpdatedAt,
         expiresAt: safeDateIso(bullet?.expiresAt),
         reviewAt: safeDateIso(bullet?.reviewAt),
         tier: normalizeTier(preferredTier, fallbackTier),

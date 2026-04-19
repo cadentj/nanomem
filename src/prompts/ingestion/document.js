@@ -24,7 +24,7 @@ Do NOT save:
 - Boilerplate (installation steps, license text, generic disclaimers)
 - Sensitive secrets (passwords, tokens, keys)
 
-Bullet format: "- Fact text | topic=topic-name | source=document | confidence=high | updated_at=YYYY-MM-DD"
+Bullet format: "- Fact text | topic=topic-name | source=document | confidence=high | updated_at=YYYY-MM-DDTHH:MM"
 
 If nothing new is worth saving, stop without calling any tools.`;
 
@@ -73,7 +73,7 @@ Instructions:
 1. Read the document content and identify concrete, reusable facts about the subject.
 2. Do not read files before writing. The memory index is sufficient to decide where to append or create. Only read a file if the index entry is ambiguous and you need the exact current content to avoid duplicating a fact.
 3. Use create_new_file for new topics, append_memory to add to existing files.
-4. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DD"
+4. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DDTHH:MM"
 5. Source values (IMPORTANT — never use source=user_statement here):
    - source=document — the fact is directly stated or clearly shown in the document. Use for the majority of facts.
    - source=document_infer — a reasonable inference from what multiple parts of the document collectively show (e.g. a repo with only C files and a README praising simplicity → "prefers low-level, minimal implementations"). Use sparingly.

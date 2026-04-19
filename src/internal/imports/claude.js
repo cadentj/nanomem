@@ -6,7 +6,7 @@
  * Messages have a `content` array of typed blocks (text, tool_use, tool_result, token_budget).
  */
 /** @import { ChatGptSession, Message } from '../../types.js' */
-import { safeDateIso } from '../format/normalize.js';
+import { safeDateTimeIso } from '../format/normalize.js';
 
 const SKIP_CONTENT_TYPES = new Set([
     'tool_use',
@@ -63,7 +63,7 @@ function normalizeClaudeConversation(conversation) {
 
     const title = (conversation?.name || '').trim() || null;
     const updatedAt = conversation?.updated_at
-        ? safeDateIso(conversation.updated_at)
+        ? safeDateTimeIso(conversation.updated_at)
         : null;
 
     return { title, messages, updatedAt };

@@ -18,6 +18,7 @@ import {
     inferStatusFromSection,
     isExpiredBullet,
     todayIsoDate,
+    nowIsoDateTime,
     normalizeTopic,
     defaultConfidenceForSource,
 } from './normalize.js';
@@ -30,6 +31,7 @@ import {
  */
 export function compactBullets(bullets, options = {}) {
     const today = options.today || todayIsoDate();
+    const now = options.now || nowIsoDateTime();
     const maxActivePerTopic = typeof options.maxActivePerTopic === 'number' && Number.isFinite(options.maxActivePerTopic)
         ? Math.max(1, options.maxActivePerTopic)
         : 24;
@@ -38,7 +40,7 @@ export function compactBullets(bullets, options = {}) {
     // Deduplicate by normalized text — keep the stronger/newer variant.
     const dedup = new Map();
     for (const original of bullets) {
-        const normalized = ensureBulletMetadata(original, { defaultTopic, updatedAt: today });
+        const normalized = ensureBulletMetadata(original, { defaultTopic, updatedAt: now });
         const key = normalizeFactText(normalized.text);
         if (!key) continue;
         const existing = dedup.get(key);

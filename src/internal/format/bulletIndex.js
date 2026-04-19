@@ -1,5 +1,5 @@
 /** @import { Bullet, BulletItem, StorageBackend } from '../../types.js' */
-import { parseBullets, todayIsoDate } from './index.js';
+import { parseBullets, nowIsoDateTime } from './index.js';
 
 class MemoryBulletIndex {
     /**
@@ -59,11 +59,11 @@ class MemoryBulletIndex {
             .filter((line) => !/^_no entries yet\._$/i.test(line))
             .slice(0, 200);
 
-        const today = todayIsoDate();
+        const now = nowIsoDateTime();
         return lines.map((line) => ({
             text: line,
             topic: path.split('/')[0] || 'general',
-            updatedAt: today,
+            updatedAt: now,
             expiresAt: null,
             reviewAt: null,
             tier: 'long_term',

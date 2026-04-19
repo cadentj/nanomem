@@ -4,6 +4,7 @@
 /** @import { Bullet } from '../../types.js' */
 import {
     safeDateIso,
+    safeDateTimeIso,
     normalizeTier,
     normalizeStatus,
     normalizeSource,
@@ -66,7 +67,7 @@ export function parseBullets(content) {
             const key = kv[1].toLowerCase();
             const value = kv[2].trim();
             if (key === 'topic') topic = value;
-            if (key === 'updated_at') updatedAt = safeDateIso(value);
+            if (key === 'updated_at') updatedAt = safeDateTimeIso(value);
             if (key === 'expires_at') expiresAt = safeDateIso(value);
             if (key === 'review_at') reviewAt = safeDateIso(value);
             if (key === 'tier') tier = normalizeTier(value);

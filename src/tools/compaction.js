@@ -19,6 +19,7 @@ import {
     inferTopicFromPath,
     parseBullets,
     todayIsoDate,
+    nowIsoDateTime,
     renderCompactedDocument
 } from '../internal/format/index.js';
 import { compactionPrompt, semanticReviewPrompt } from '../prompts/compaction.js';
@@ -172,7 +173,7 @@ class MemoryCompactor {
 
     async _llmRewrite(path, raw) {
         const prompt = compactionPrompt
-            .replace('{TODAY}', todayIsoDate())
+            .replace('{NOW}', nowIsoDateTime())
             .replace('{PATH}', path)
             .replace('{CONTENT}', raw.length > MAX_FILE_CHARS ? raw.slice(0, MAX_FILE_CHARS) + '\n...(truncated)' : raw);
 

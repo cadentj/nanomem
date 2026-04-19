@@ -27,7 +27,7 @@ export function buildTree(files) {
         for (const file of files) {
             const count = file.itemCount || 0;
             const updated = file.updatedAt
-                ? new Date(file.updatedAt).toISOString().split('T')[0]
+                ? new Date(file.updatedAt).toISOString().slice(0, 16).replace('T', ' ')
                 : '';
             const meta = count > 0
                 ? `(${count} item${count !== 1 ? 's' : ''}, updated ${updated})`

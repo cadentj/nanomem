@@ -14,7 +14,7 @@ import {
     inferTopicFromPath,
     parseBullets,
     renderCompactedDocument,
-    todayIsoDate
+    nowIsoDateTime
 } from '../internal/format/index.js';
 
 const MAX_CONVERSATION_CHARS = 128000;
@@ -128,7 +128,7 @@ class MemoryIngester {
      * @returns {Promise<IngestResult>}
      */
     async ingest(messages, options = {}) {
-        const updatedAt = options.updatedAt || todayIsoDate();
+        const updatedAt = options.updatedAt || nowIsoDateTime();
         const onToolCall = this._onToolCall;
         const signal = options.signal || null;
         if (!messages || messages.length === 0) return { status: 'skipped', writeCalls: 0 };
