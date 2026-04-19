@@ -152,6 +152,7 @@
  * @property {ToolDefinition[]} [tools]
  * @property {number} [max_tokens]
  * @property {number} [temperature]
+ * @property {AbortSignal | null} [signal]
  */
 
 /**
@@ -161,6 +162,7 @@
  * @property {ToolDefinition[]} [tools]
  * @property {number} [max_tokens]
  * @property {number} [temperature]
+ * @property {AbortSignal | null} [signal]
  * @property {(text: string) => void} [onDelta]
  * @property {(text: string) => void} [onReasoning]
  */
@@ -228,6 +230,7 @@
  * @property {'conversation' | 'document' | string} [mode] - Prompt set to use for extraction
  * @property {'conversation' | 'document' | string} [extractionMode] - Alias for mode (deprecated, use mode)
  * @property {string} [sessionTitle]
+ * @property {AbortSignal | null} [signal]
  */
 
 /**
@@ -398,6 +401,7 @@
  * @property {string} [sessionTitle]
  * @property {'conversation' | 'document'} [mode]
  * @property {(event: ImportProgressEvent) => void} [onProgress]
+ * @property {AbortSignal | null} [signal]
  */
 
 /**
@@ -417,6 +421,7 @@
  * @property {number} errors
  * @property {number} totalWriteCalls
  * @property {string | null} authError
+ * @property {boolean} aborted
  * @property {ImportDataItemResult[]} results
  */
 

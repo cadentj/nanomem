@@ -130,7 +130,11 @@ class MemoryIngester {
     async ingest(messages, options = {}) {
         const updatedAt = options.updatedAt || todayIsoDate();
         const onToolCall = this._onToolCall;
+        const signal = options.signal || null;
         if (!messages || messages.length === 0) return { status: 'skipped', writeCalls: 0 };
+        if (signal?.aborted) {
+            throw createAbortError();
+        }
 
         // Support both `mode` and legacy `extractionMode`
         const mode = options.mode || options.extractionMode || 'conversation';
@@ -175,14 +179,22 @@ class MemoryIngester {
                 maxIterations: 12,
                 maxOutputTokens: 4000,
                 temperature: 0,
+                signal,
                 onToolCall: (name, args, result, meta) => {
                     onToolCall?.(name, args, result, meta);
                 }
             });
             toolCallLog = result.toolCallLog;
         } catch (error) {
+            if (isAbortError(error, signal)) {
+                throw createAbortError();
+            }
             const message = error instanceof Error ? error.message : String(error);
             return { status: 'error', writeCalls: 0, error: message };
+        }
+
+        if (signal?.aborted) {
+            throw createAbortError();
         }
 
         const writeTools = ['create_new_file', 'append_memory', 'update_bullets', 'archive_memory', 'delete_memory'];
@@ -259,6 +271,18 @@ class MemoryIngester {
         const compacted = compactBullets(merged, { defaultTopic, maxActivePerTopic: 1000 });
         return renderCompactedDocument(compacted.working, compacted.longTerm, compacted.history, { titleTopic: defaultTopic });
     }
+}
+
+function createAbortError() {
+    const error = new Error('Memory ingestion aborted.');
+    error.name = 'AbortError';
+    error.isUserAbort = true;
+    return error;
+}
+
+function isAbortError(error, signal) {
+    if (signal?.aborted) return true;
+    return error?.name === 'AbortError' || error?.isUserAbort === true;
 }
 
 export { MemoryIngester };

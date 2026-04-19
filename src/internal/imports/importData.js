@@ -18,6 +18,7 @@ import { parseMarkdownFiles } from './markdown.js';
 export async function importData(memoryBank, input, options = {}) {
     const parsed = parseImportInput(input, options);
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+    const signal = options.signal || null;
     const totalItems = parsed.items.length;
 
     await memoryBank.init();
@@ -33,8 +34,14 @@ export async function importData(memoryBank, input, options = {}) {
     let errors = 0;
     let totalWriteCalls = 0;
     let authError = null;
+    let aborted = isAbortRequested(signal);
 
     for (let index = 0; index < parsed.items.length; index += 1) {
+        if (isAbortRequested(signal)) {
+            aborted = true;
+            break;
+        }
+
         const item = parsed.items[index];
         const title = normalizeTitle(item.title);
 
@@ -60,7 +67,8 @@ export async function importData(memoryBank, input, options = {}) {
                     mode: item.mode || parsed.mode,
                     extractionMode: item.mode || parsed.mode,
                     sessionTitle: title || undefined,
-                    updatedAt: normalizeUpdatedAt(item.updatedAt) || undefined
+                    updatedAt: normalizeUpdatedAt(item.updatedAt) || undefined,
+                    signal
                 });
 
                 itemResult = {
@@ -71,6 +79,10 @@ export async function importData(memoryBank, input, options = {}) {
                     ...(ingestResult.error ? { error: ingestResult.error } : {})
                 };
             } catch (error) {
+                if (isAbortError(error, signal)) {
+                    aborted = true;
+                    break;
+                }
                 itemResult = {
                     title,
                     updatedAt: normalizeUpdatedAt(item.updatedAt),
@@ -104,7 +116,8 @@ export async function importData(memoryBank, input, options = {}) {
             itemError: itemResult.error || null
         });
 
-        if (authError) {
+        if (authError || isAbortRequested(signal)) {
+            aborted = aborted || isAbortRequested(signal);
             break;
         }
     }
@@ -116,6 +129,7 @@ export async function importData(memoryBank, input, options = {}) {
         errors,
         totalWriteCalls,
         authError,
+        aborted,
         results
     };
 
@@ -125,6 +139,17 @@ export async function importData(memoryBank, input, options = {}) {
     });
 
     return summary;
+}
+
+function isAbortRequested(signal) {
+    return !!signal?.aborted;
+}
+
+function isAbortError(error, signal) {
+    if (isAbortRequested(signal)) {
+        return true;
+    }
+    return error?.name === 'AbortError' || error?.isUserAbort === true;
 }
 
 /**

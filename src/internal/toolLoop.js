@@ -42,6 +42,11 @@ export async function runAgenticToolLoop(options) {
     let textResponse = '';
     let terminalToolResult = null;
     let iterations = 0;
+    const throwIfAborted = () => {
+        if (signal?.aborted) {
+            throw createAbortError();
+        }
+    };
     const emitToolCall = (name, args, result, meta) => {
         onToolCall?.(name, args, result, meta);
     };
@@ -51,7 +56,7 @@ export async function runAgenticToolLoop(options) {
     const useStreaming = !!onReasoning && !!llmClient.streamChatCompletion;
 
     for (let i = 0; i < maxIterations; i++) {
-        if (signal?.aborted) break;
+        throwIfAborted();
         iterations++;
 
         const requestPayload = {
@@ -73,12 +78,17 @@ export async function runAgenticToolLoop(options) {
         if (useStreaming) {
             response = await llmClient.streamChatCompletion({
                 ...requestPayload,
+                signal,
                 onDelta: (d) => { iterationText += d; },
                 onReasoning: (d) => { onReasoning(d, iterations); }
             });
         } else {
-            response = await llmClient.createChatCompletion(requestPayload);
+            response = await llmClient.createChatCompletion({
+                ...requestPayload,
+                signal
+            });
         }
+        throwIfAborted();
 
         // If output was truncated and no tool calls came through, retry once with 2× tokens.
         if (response.finish_reason === 'length' && (response.tool_calls || []).length === 0) {
@@ -86,8 +96,9 @@ export async function runAgenticToolLoop(options) {
             const retryPayload = { ...requestPayload, max_tokens: retryTokens };
             iterationText = '';
             response = useStreaming
-                ? await llmClient.streamChatCompletion({ ...retryPayload, onDelta: (d) => { iterationText += d; }, onReasoning: (d) => { onReasoning(d, iterations); } })
-                : await llmClient.createChatCompletion(retryPayload);
+                ? await llmClient.streamChatCompletion({ ...retryPayload, signal, onDelta: (d) => { iterationText += d; }, onReasoning: (d) => { onReasoning(d, iterations); } })
+                : await llmClient.createChatCompletion({ ...retryPayload, signal });
+            throwIfAborted();
         }
 
         const responseToolCalls = response.tool_calls || [];
@@ -114,6 +125,7 @@ export async function runAgenticToolLoop(options) {
         // Execute each tool call
         let hitTerminal = false;
         for (const [toolIndex, tc] of responseToolCalls.entries()) {
+            throwIfAborted();
             const toolName = tc.function?.name || '';
             let args;
             try {
@@ -148,6 +160,7 @@ export async function runAgenticToolLoop(options) {
                         }
                     }
                 }
+                throwIfAborted();
 
                 terminalToolResult = { name: toolName, arguments: args, result };
                 toolCallLog.push({ name: toolName, args, result, toolCallId });
@@ -188,6 +201,7 @@ export async function runAgenticToolLoop(options) {
                     result = JSON.stringify({ error: `Tool error: ${message}` });
                 }
             }
+            throwIfAborted();
 
             toolCallLog.push({ name: toolName, args, result, toolCallId });
             emitToolCall(toolName, args, result, {
@@ -215,4 +229,11 @@ export async function runAgenticToolLoop(options) {
         iterations,
         toolCallLog
     };
+}
+
+function createAbortError() {
+    const error = new Error('Tool loop aborted.');
+    error.name = 'AbortError';
+    error.isUserAbort = true;
+    return error;
 }

@@ -8,7 +8,7 @@
  */
 /** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, ToolCall } from '../../types.js' */
 /**
- * @typedef {Error & { status?: number, retryable?: boolean, retryAfterMs?: number | null, _retryFinalized?: boolean }} ApiError
+ * @typedef {Error & { status?: number, retryable?: boolean, retryAfterMs?: number | null, _retryFinalized?: boolean, isUserAbort?: boolean }} ApiError
  */
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
@@ -41,20 +41,21 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
         };
     }
 
-    function buildRequestInit(body) {
+    function buildRequestInit(body, signal = null) {
         return {
             method: 'POST',
             headers: buildHeaders(),
             body: JSON.stringify(body),
+            ...(signal ? { signal } : {}),
         };
     }
 
-    async function createChatCompletion({ model, messages, tools, max_tokens, temperature }) {
+    async function createChatCompletion({ model, messages, tools, max_tokens, temperature, signal }) {
         const body = { model, messages, temperature };
         if (max_tokens != null) body.max_tokens = max_tokens;
         if (tools && tools.length > 0) body.tools = tools;
 
-        const response = await fetchWithRetry(`${base}/chat/completions`, buildRequestInit(body), 'chat completion request');
+        const response = await fetchWithRetry(`${base}/chat/completions`, buildRequestInit(body, signal), 'chat completion request', signal);
 
         const data = await response.json();
         const choice = data.choices?.[0]?.message || {};
@@ -73,13 +74,14 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
         };
     }
 
-    async function streamChatCompletion({ model, messages, tools, max_tokens, temperature, onDelta, onReasoning }) {
+    async function streamChatCompletion({ model, messages, tools, max_tokens, temperature, signal, onDelta, onReasoning }) {
         const body = { model, messages, temperature, stream: true };
         if (max_tokens != null) body.max_tokens = max_tokens;
         if (tools && tools.length > 0) body.tools = tools;
 
         return withRetry(async (attempt) => {
-            const response = await fetch(`${base}/chat/completions`, buildRequestInit(body));
+            throwIfAborted(signal);
+            const response = await fetch(`${base}/chat/completions`, buildRequestInit(body, signal));
             if (!response.ok) {
                 throw await createHttpError(response, attempt);
             }
@@ -126,6 +128,9 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
                     }
                 });
             } catch (error) {
+                if (isAbortError(error, signal)) {
+                    throw markAbortError(error);
+                }
                 if (!sawStreamData && isRetryableNetworkError(error)) {
                     const retryError = asError(error);
                     retryError.retryable = true;
@@ -143,7 +148,7 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
                 tool_calls,
                 usage: null,
             };
-        }, 'streaming chat completion');
+        }, 'streaming chat completion', signal);
     }
 
     return { createChatCompletion, streamChatCompletion };
@@ -151,22 +156,27 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
 
 // ─── SSE Parser ──────────────────────────────────────────────
 
-async function fetchWithRetry(url, init, context) {
+async function fetchWithRetry(url, init, context, signal = null) {
     return withRetry(async (attempt) => {
+        throwIfAborted(signal);
         const response = await fetch(url, init);
         if (!response.ok) {
             throw await createHttpError(response, attempt);
         }
         return response;
-    }, context);
+    }, context, signal);
 }
 
-async function withRetry(fn, context) {
+async function withRetry(fn, context, signal = null) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+        throwIfAborted(signal);
         try {
             return await fn(attempt);
         } catch (error) {
             const normalized = asError(error);
+            if (isAbortError(normalized, signal)) {
+                throw markAbortError(normalized);
+            }
             const shouldRetry = attempt < MAX_ATTEMPTS && isRetryableError(normalized);
             if (!shouldRetry) {
                 throw finalizeRetryError(normalized, attempt);
@@ -174,7 +184,7 @@ async function withRetry(fn, context) {
 
             const delay = getRetryDelay(attempt - 1, normalized.retryAfterMs || null);
             console.warn(`[nanomem/openai] ${context} attempt ${attempt}/${MAX_ATTEMPTS} failed: ${normalized.message}. Retrying in ${Math.round(delay)}ms.`);
-            await sleep(delay);
+            await sleep(delay, signal);
         }
     }
 
@@ -221,8 +231,29 @@ function getRetryDelay(attempt, retryAfterMs = null) {
     return Math.min(exponential + jitter, MAX_DELAY_MS);
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms, signal = null) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            cleanup();
+            resolve();
+        }, ms);
+
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            signal?.removeEventListener?.('abort', onAbort);
+        };
+        const onAbort = () => {
+            cleanup();
+            reject(createAbortError('OpenAI API request aborted.'));
+        };
+
+        if (signal?.aborted) {
+            onAbort();
+            return;
+        }
+
+        signal?.addEventListener?.('abort', onAbort, { once: true });
+    });
 }
 
 async function createHttpError(response, attempt = 1) {
@@ -272,6 +303,33 @@ function finalizeRetryError(error, attempts) {
  */
 function asError(error) {
     return /** @type {ApiError} */ (error instanceof Error ? error : new Error(String(error)));
+}
+
+function throwIfAborted(signal) {
+    if (signal?.aborted) {
+        throw createAbortError('OpenAI API request aborted.');
+    }
+}
+
+function createAbortError(message) {
+    const error = /** @type {ApiError} */ (new Error(message));
+    error.name = 'AbortError';
+    error.isUserAbort = true;
+    return error;
+}
+
+function isAbortError(error, signal) {
+    if (signal?.aborted) {
+        return true;
+    }
+    return error?.name === 'AbortError' || error?.isUserAbort === true;
+}
+
+function markAbortError(error) {
+    const normalized = asError(error);
+    normalized.name = 'AbortError';
+    normalized.isUserAbort = true;
+    return normalized;
 }
 
 async function readSSE(response, onMessage) {
