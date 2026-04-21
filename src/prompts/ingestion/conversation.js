@@ -82,9 +82,9 @@ Current memory index:
 
 Instructions:
 1. Read the conversation below and identify facts the user explicitly stated.
-2. Do not read files before writing. The memory index is sufficient to decide where to append. Only read a file if the index entry is ambiguous and you need the exact current content to avoid duplicating a fact.
-3. If no relevant file exists yet, create_new_file directly.
-4. Default to append_memory when an existing file covers the same domain or a closely related topic. Only use create_new_file when no existing file is thematically close.
+2. Default to append_memory when an existing file covers the same domain or a closely related topic. Only use create_new_file when no existing file is thematically close.
+3. Before calling append_memory or update_bullets on an existing file, use read_file to check its current bullets. This prevents re-saving facts that are already there. Skip reads only when creating a new file.
+4. If no relevant file exists yet, create_new_file directly.
 5. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DDTHH:MM"
    For time-bound facts, append: | expires_at=YYYY-MM-DD
 6. Source values:

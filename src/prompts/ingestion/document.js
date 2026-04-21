@@ -72,8 +72,8 @@ Current memory index:
 
 Instructions:
 1. Read the document content and identify concrete, reusable facts about the subject.
-2. Do not read files before writing. The memory index is sufficient to decide where to append or create. Only read a file if the index entry is ambiguous and you need the exact current content to avoid duplicating a fact.
-3. Use create_new_file for new topics, append_memory to add to existing files.
+2. Use create_new_file for new topics, append_memory to add to existing files.
+3. Before calling append_memory on an existing file, use read_file to check its current bullets. This prevents re-saving facts already captured. Skip reads only when creating a new file.
 4. Use this bullet format: "- Fact text | topic=topic-name | source=SOURCE | confidence=LEVEL | updated_at=YYYY-MM-DDTHH:MM"
 5. Source values (IMPORTANT — never use source=user_statement here):
    - source=document — the fact is directly stated or clearly shown in the document. Use for the majority of facts.
