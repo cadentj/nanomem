@@ -158,16 +158,17 @@ describe('parseChatGptExport', () => {
         assert.equal(sessions[0].messages[1].role, 'assistant');
     });
 
-    it('extracts updatedAt as ISO date', () => {
+    it('extracts updatedAt as a local ISO minute timestamp', () => {
+        const localDate = new Date(2023, 10, 14, 14, 13, 0);
         const data = makeChatGptExport([{
             title: 'Dated',
-            update_time: 1700000000,
+            update_time: Math.floor(localDate.getTime() / 1000),
             messages: [{ role: 'user', content: 'test' }],
         }]);
 
         const sessions = parseChatGptExport(data);
         assert.ok(sessions[0].updatedAt);
-        assert.match(sessions[0].updatedAt, /^\d{4}-\d{2}-\d{2}$/);
+        assert.equal(sessions[0].updatedAt, '2023-11-14T14:13');
     });
 
     it('handles null title gracefully', () => {

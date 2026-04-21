@@ -173,15 +173,15 @@ describe('parseClaudeExport', () => {
         assert.equal(sessions[0].messages[1].content, 'Final answer.');
     });
 
-    it('extracts updatedAt as ISO date', () => {
+    it('returns null updatedAt for an invalid timestamp', () => {
         const data = makeClaudeExport([{
             name: 'Dated',
-            updated_at: '2025-06-15T14:30:00Z',
+            updated_at: 'not-a-date',
             messages: [{ sender: 'human', content: 'test' }],
         }]);
 
         const sessions = parseClaudeExport(data);
-        assert.equal(sessions[0].updatedAt, '2025-06-15');
+        assert.equal(sessions[0].updatedAt, null);
     });
 
     it('handles null/empty name gracefully', () => {

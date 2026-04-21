@@ -41,7 +41,7 @@ describe('parseBullets', () => {
         assert.equal(b.status, 'active');
         assert.equal(b.source, 'user_statement');
         assert.equal(b.confidence, 'high');
-        assert.equal(b.updatedAt, '2024-06-01');
+        assert.equal(b.updatedAt, '2024-06-01T00:00');
     });
 
     it('assigns section from heading context', () => {
@@ -164,7 +164,7 @@ describe('renderBullet / parseBullets round-trip', () => {
         assert.equal(parsed[0].status, original.status);
         assert.equal(parsed[0].source, original.source);
         assert.equal(parsed[0].confidence, original.confidence);
-        assert.equal(parsed[0].updatedAt, original.updatedAt);
+        assert.equal(parsed[0].updatedAt, '2024-06-15T00:00');
     });
 });
 
