@@ -190,15 +190,16 @@ function _extractContext(raw) {
 function synthesizeAdaptiveAnswer(query, context) {
     const text = String(context || '').trim();
     if (!text) return null;
-
-    const lines = text
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter((line) => !line.startsWith('### '));
-    if (lines.length === 0) return null;
-
     const queryText = String(query || '').toLowerCase();
+    const blocks = splitContextBlocks(text);
+
+    if (/\bdeadline|deadlines|launch|due\b/.test(queryText)) {
+        const entryAnswer = summarizeEntryDeadlines(blocks);
+        if (entryAnswer) return entryAnswer;
+    }
+
+    const lines = blocks.flatMap((block) => block.lines);
+    if (lines.length === 0) return null;
 
     if (/\bdeadline|deadlines|launch|due\b/.test(queryText)) {
         const relevant = lines.filter((line) => /\bdeadline|deadlines|launch|due|alpha\b/i.test(line));
@@ -219,6 +220,53 @@ function synthesizeAdaptiveAnswer(query, context) {
         .map((line) => line.replace(/\s+\|\s+.*$/, ''))
         .filter(Boolean);
     return cleanedBullets.join('\n\n') || null;
+}
+
+function splitContextBlocks(text) {
+    return String(text || '')
+        .split(/\n\s*\n/)
+        .map((block) => block.trim())
+        .filter(Boolean)
+        .map((block) => ({
+            raw: block,
+            lines: block
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .filter((line) => !line.startsWith('### '))
+                .map((line) => line.replace(/\s+\|\s+.*$/, ''))
+        }))
+        .filter((block) => block.lines.length > 0);
+}
+
+function summarizeEntryDeadlines(blocks) {
+    const entries = blocks
+        .map(({ raw, lines }) => {
+            const paragraph = lines.join(' ').trim();
+            const match = /^\*\*([^*]+)\*\*\s+[—-]\s+([\s\S]+)$/.exec(paragraph);
+            if (!match) return null;
+            return {
+                name: match[1].trim(),
+                text: match[2].trim()
+            };
+        })
+        .filter(Boolean);
+
+    if (entries.length === 0) return null;
+
+    const summaries = entries.map(({ name, text }) => {
+        const deadlineMatch = /\b(?:deadline|launch deadline)\s+of\s+([^.,;]+)/i.exec(text)
+            || /\bdue\s+(?:on\s+)?([^.,;]+)/i.exec(text)
+            || /\blaunch(?:ing)?\s+(?:on\s+)?([^.,;]+)/i.exec(text);
+
+        if (deadlineMatch) {
+            return `${name} has a deadline of ${deadlineMatch[1].trim()}.`;
+        }
+
+        return `No specific deadline is mentioned for ${name}.`;
+    });
+
+    return summaries.join('\n\n');
 }
 
 export async function importCmd(positionals, flags, mem, config, { showProgress, spinnerHolder } = {}) {

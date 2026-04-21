@@ -560,20 +560,16 @@ class MemoryRetriever {
     _fallbackDisplayText(query, sourceContext) {
         const context = String(sourceContext || '').trim();
         if (!context) return null;
-
-        const cleanedLines = context
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .filter((line) => !line.startsWith('### '))
-            .map((line) => line.startsWith('- ')
-                ? line.replace(/\s+\|\s+.*$/, '')
-                : line
-            );
-
-        if (cleanedLines.length === 0) return null;
-
         const queryText = String(query || '').toLowerCase();
+        const blocks = this._splitContextBlocks(context);
+
+        if (/\bdeadline|deadlines|launch|due\b/.test(queryText)) {
+            const entryAnswer = this._summarizeEntryDeadlines(blocks);
+            if (entryAnswer) return entryAnswer;
+        }
+
+        const cleanedLines = blocks.flatMap((block) => block.lines);
+        if (cleanedLines.length === 0) return null;
 
         if (/\bdeadline|deadlines|launch|due\b/.test(queryText)) {
             const relevant = cleanedLines.filter((line) => /\bdeadline|deadlines|launch|due|alpha\b/i.test(line));
@@ -595,6 +591,53 @@ class MemoryRetriever {
         }
 
         return cleanedLines.join('\n\n');
+    }
+
+    _splitContextBlocks(text) {
+        return String(text || '')
+            .split(/\n\s*\n/)
+            .map((block) => block.trim())
+            .filter(Boolean)
+            .map((block) => ({
+                raw: block,
+                lines: block
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .filter((line) => !line.startsWith('### '))
+                    .map((line) => line.replace(/\s+\|\s+.*$/, ''))
+            }))
+            .filter((block) => block.lines.length > 0);
+    }
+
+    _summarizeEntryDeadlines(blocks) {
+        const entries = blocks
+            .map(({ lines }) => {
+                const paragraph = lines.join(' ').trim();
+                const match = /^\*\*([^*]+)\*\*\s+[—-]\s+([\s\S]+)$/.exec(paragraph);
+                if (!match) return null;
+                return {
+                    name: match[1].trim(),
+                    text: match[2].trim()
+                };
+            })
+            .filter(Boolean);
+
+        if (entries.length === 0) return null;
+
+        const summaries = entries.map(({ name, text }) => {
+            const deadlineMatch = /\b(?:deadline|launch deadline)\s+of\s+([^.,;]+)/i.exec(text)
+                || /\bdue\s+(?:on\s+)?([^.,;]+)/i.exec(text)
+                || /\blaunch(?:ing)?\s+(?:on\s+)?([^.,;]+)/i.exec(text);
+
+            if (deadlineMatch) {
+                return `${name} has a deadline of ${deadlineMatch[1].trim()}.`;
+            }
+
+            return `No specific deadline is mentioned for ${name}.`;
+        });
+
+        return summaries.join('\n\n');
     }
 
     async _buildSnippetContext(paths, query, conversationText) {
