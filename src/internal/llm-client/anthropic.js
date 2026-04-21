@@ -4,7 +4,7 @@
  * Translates the standard LLM client interface (OpenAI Chat Completions format)
  * into Anthropic's Messages API format, so the memory system can use Claude models.
  *
- * Uses `fetch` (built into Node 18+ and browsers).
+ * Uses `fetch` (built into Node 20+ and browsers).
  */
 /** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, LLMMessage, ToolCall, ToolDefinition } from '../../types.js' */
 

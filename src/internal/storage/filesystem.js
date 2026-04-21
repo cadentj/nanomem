@@ -1,7 +1,7 @@
 /**
  * FileSystemStorage — Node.js filesystem storage backend.
  *
- * Stores memory files as .md files on disk. Uses fs/promises (Node 18+).
+ * Stores memory files as .md files on disk. Uses fs/promises (Node 20+).
  */
 /** @import { ExportRecord, StorageMetadata } from '../../types.js' */
 import { readdir, readFile, writeFile, unlink, mkdir, rm, stat } from 'node:fs/promises';

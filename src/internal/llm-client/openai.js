@@ -4,7 +4,7 @@
  * Works with OpenAI, Tinfoil, OpenRouter, or any provider
  * that implements the OpenAI Chat Completions API format.
  *
- * Uses `fetch` (built into Node 18+ and browsers).
+ * Uses `fetch` (built into Node 20+ and browsers).
  */
 /** @import { ChatCompletionParams, ChatCompletionResponse, LLMClient, LLMClientOptions, ToolCall } from '../../types.js' */
 /**

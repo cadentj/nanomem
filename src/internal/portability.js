@@ -97,7 +97,7 @@ function concatU8(arrays) {
 
 /**
  * Produce a valid ZIP archive (STORE, no compression) from an array of records.
- * Works in Node.js ≥ 18 and modern browsers (uses TextEncoder + Uint8Array only).
+ * Works in Node.js ≥ 20 and modern browsers (uses TextEncoder + Uint8Array only).
  *
  * @param {ExportRecord[]} records
  * @returns {Uint8Array}
