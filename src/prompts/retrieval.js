@@ -29,6 +29,8 @@ CONSERVATIVE DEFAULT — when in doubt, retrieve nothing:
 - General knowledge questions, how-to questions, and topic explanations rarely benefit from personal memory.
 - If the only files you would read are loosely topical (same domain as the query, but the facts inside wouldn't change the answer), skip them.
 - Sparse or thin memory files (few facts, unrelated to the actual question) do not raise the answer quality — do not retrieve them.
+- IMPORTANT exception: If the query is underspecified and a personal fact would resolve a missing parameter, ambiguity, or decision variable, that DOES count as meaningfully improving the answer. In those cases, retrieve the missing personal context before deciding to skip.
+- Even in those cases, stay minimal: retrieve only the specific missing variable(s), not the whole surrounding domain. But do perform at least one targeted lookup for that missing variable before deciding to skip.
 
 IMPORTANT — Domain-exhaustive retrieval:
 - When a query touches a domain (health, work, personal), prefer completeness over selectivity within that domain. File descriptions may be incomplete.
@@ -42,6 +44,23 @@ Examples of implied needs:
 - "Should I bring a jacket?" or weather questions → user's current location
 - Scheduling or timing questions → user's timezone or work schedule
 If the query implies a needed personal fact that isn't in the index path names, use retrieve_file to search for it (e.g. retrieve_file("location"), retrieve_file("city"), retrieve_file("home")).
+
+Queries that often need implied context even when not stated explicitly:
+- price, cost, fare, budget, affordability, "how much" → location, region, travel origin, household size, or financial context
+- travel time, commute time, distance, "how long", "closest", logistics → current location, home city, usual transport mode
+- suitability questions like "is this worth it", "should I go", "is it far", "is it expensive" → preferences, budget, location, schedule, or current commitments
+
+If a likely implied fact is missing or ambiguous, do NOT immediately give up. First retrieve the relevant memory files that could contain that fact. If memory contains conflicting candidates (for example an older city and a newer city), mention the ambiguity in the assembled answer rather than pretending memory is irrelevant.
+
+Minimal implied-context retrieval rules:
+- If the query is missing a user-specific variable that would materially change the answer, do at least one targeted retrieval attempt for that variable before returning no context.
+- Retrieve the fewest files needed to resolve the missing parameter.
+- Prefer one likely file over listing or reading a whole directory.
+- Do not broaden from the missing variable to adjacent biography unless it clearly changes the answer.
+- If one retrieved file already gives the needed context, stop and answer.
+- Only expand to a second or third file if the first result is missing, ambiguous, or contradictory.
+- For implied-context retrieval, favor narrow searches like location, timezone, budget, dietary preference, or schedule over broad domain sweeps.
+- Do not treat "minimal" as "skip retrieval entirely." Minimal means one or two highly targeted reads, not zero reads.
 
 When recent conversation context is provided alongside the query, use it to resolve references like "that", "the same", "what we discussed", etc. The conversation shows what the user has been talking about recently.
 
@@ -86,9 +105,9 @@ Instructions:
 4. Once you have retrieved new information, call assemble_context with ONLY the newly found facts in content. Do not repeat what was already retrieved. Leave skipped unset (or false).
 5. If you searched but found nothing new, call assemble_context with an empty string and skipped=true, skip_reason="No new relevant memory found."
 
-Conservative default: Before retrieving anything new, ask "Would personal memory give a meaningfully better answer to this specific query?" If not clearly yes, call assemble_context with an empty string and skipped=true. Statements of current activity ("I'm studying X", "I started Y") and general knowledge questions almost never need memory retrieval.
+Conservative default: Before retrieving anything new, ask "Would personal memory give a meaningfully better answer to this specific query?" If not clearly yes, call assemble_context with an empty string and skipped=true. Statements of current activity ("I'm studying X", "I started Y") and general knowledge questions almost never need memory retrieval. Exception: if the query is underspecified and personal memory would supply a missing parameter, ambiguity, or decision variable, you SHOULD retrieve that missing context — but only that context, as narrowly as possible, and you should make at least one targeted retrieval attempt before skipping.
 
-Implied context: When a query does warrant retrieval, consider what unstated personal facts it depends on. Travel/flight queries need the user's home city; cost questions may need financial context; recommendations need location or preferences. Retrieve those implied facts if they are missing from already-retrieved context.
+Implied context: When a query does warrant retrieval, consider what unstated personal facts it depends on. Travel/flight queries need the user's home city; cost questions may need financial context; recommendations need location or preferences. More generally, "how much", "how long", "is it worth it", "closest", "affordable", and similar queries often depend on user-specific context that is not stated explicitly. Retrieve those implied facts if they are missing from already-retrieved context.
 
 When recent conversation is provided alongside the query, use it to resolve references like "that", "the same", "what we discussed", etc.
 

@@ -28,6 +28,7 @@ const MAX_AUGMENT_TOTAL_CHARS = 12000;
 const MAX_AUGMENT_RECENT_CONTEXT_CHARS = 3000;
 const AUGMENT_CRAFTER_MAX_ATTEMPTS = 3;
 const AUGMENT_CRAFTER_RETRY_BASE_DELAY_MS = 350;
+const MAX_READ_FILE_CHARS = 1500;
 
 function normalizeLookupPath(value, { stripExtension = false } = {}) {
     let normalized = String(value || '')
@@ -158,11 +159,124 @@ function normalizeQueryText(text) {
     return String(text || '').trim().replace(/\s+/g, ' ');
 }
 
+function queryTerms(text) {
+    const stopwords = new Set([
+        'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'did', 'do', 'does',
+        'for', 'from', 'had', 'has', 'have', 'help', 'how', 'i', 'if', 'in', 'into',
+        'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'so', 'that', 'the', 'their',
+        'them', 'they', 'this', 'to', 'use', 'was', 'what', 'when', 'where', 'which',
+        'who', 'why', 'with', 'would', 'you', 'your'
+    ]);
+    return normalizeFactText(String(text || '').toLowerCase())
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 3 && !stopwords.has(part));
+}
+
+function clipReadContent(content, query = '') {
+    const text = String(content || '');
+    if (text.length <= MAX_READ_FILE_CHARS) return text;
+
+    const terms = queryTerms(query);
+    const lines = text.split('\n');
+
+    if (terms.length > 0 && lines.length > 1) {
+        const scored = [];
+        let currentSection = '';
+
+        for (let i = 0; i < lines.length; i += 1) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            if (trimmed.startsWith('#')) {
+                currentSection = line;
+                continue;
+            }
+
+            const normalizedLine = normalizeFactText(line.toLowerCase());
+            if (!normalizedLine) continue;
+
+            let score = 0;
+            for (const term of terms) {
+                if (normalizedLine.includes(term)) score += 1;
+            }
+
+            if (score > 0) {
+                scored.push({ index: i, score, line, section: currentSection });
+            }
+        }
+
+        if (scored.length > 0) {
+            scored.sort((a, b) => b.score - a.score || a.index - b.index);
+
+            const chosen = [];
+            const seenLines = new Set();
+            let usedChars = 0;
+
+            for (const entry of scored) {
+                const block = [];
+                if (entry.section && !seenLines.has(`section:${entry.section}`)) {
+                    block.push(entry.section);
+                }
+                if (!seenLines.has(`line:${entry.index}`)) {
+                    block.push(entry.line);
+                }
+
+                const blockText = block.join('\n');
+                const projected = usedChars + blockText.length + (chosen.length > 0 ? 2 : 0);
+                if (projected > MAX_READ_FILE_CHARS) continue;
+
+                chosen.push(blockText);
+                usedChars = projected;
+                if (entry.section) seenLines.add(`section:${entry.section}`);
+                seenLines.add(`line:${entry.index}`);
+            }
+
+            if (chosen.length > 0) {
+                return `...(selected relevant excerpts)\n${chosen.join('\n\n')}\n...(truncated)`;
+            }
+        }
+    }
+
+    const lower = text.toLowerCase();
+    let bestIndex = -1;
+
+    for (const term of terms) {
+        const index = lower.indexOf(term.toLowerCase());
+        if (index !== -1 && (bestIndex === -1 || index < bestIndex)) {
+            bestIndex = index;
+        }
+    }
+
+    if (bestIndex === -1) {
+        return `${text.slice(0, MAX_READ_FILE_CHARS)}...(truncated)`;
+    }
+
+    const contextRadius = Math.floor(MAX_READ_FILE_CHARS / 2);
+    let start = Math.max(0, bestIndex - contextRadius);
+    let end = Math.min(text.length, start + MAX_READ_FILE_CHARS);
+    start = Math.max(0, end - MAX_READ_FILE_CHARS);
+
+    const newlineStart = text.lastIndexOf('\n', start);
+    if (newlineStart !== -1 && newlineStart < bestIndex) {
+        start = newlineStart + 1;
+    }
+
+    const newlineEnd = text.indexOf('\n', end);
+    if (newlineEnd !== -1) {
+        end = newlineEnd;
+    }
+
+    const prefix = start > 0 ? '...(truncated)\n' : '';
+    const suffix = end < text.length ? '\n...(truncated)' : '';
+    return `${prefix}${text.slice(start, end)}${suffix}`;
+}
+
 /**
  * Build tool executors for the retrieval (read) flow.
  * @param {StorageBackend} backend
  */
-export function createRetrievalExecutors(backend) {
+export function createRetrievalExecutors(backend, options = {}) {
+    const activeQuery = typeof options?.query === 'string' ? options.query : '';
     return {
         list_directory: async ({ dir_path }) => {
             const { files, dirs } = await backend.ls(dir_path || '');
@@ -193,7 +307,7 @@ export function createRetrievalExecutors(backend) {
                 : null;
             const content = await backend.read(resolvedPath || path);
             if (content === null) return JSON.stringify({ error: `File not found: ${path}` });
-            return content.length > 1500 ? content.slice(0, 1500) + '...(truncated)' : content;
+            return clipReadContent(content, activeQuery);
         }
     };
 }
