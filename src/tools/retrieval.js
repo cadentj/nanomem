@@ -234,7 +234,7 @@ class MemoryRetriever {
             (isAugmentMode ? AUGMENT_SYSTEM_ADDENDUM : '')
         );
         const toolExecutors = {
-            ...createRetrievalExecutors(this._backend, { query }),
+            ...createRetrievalExecutors(this._backend),
             ...(isAugmentMode ? {
                 augment_query: createAugmentQueryExecutor({
                     backend: this._backend,
@@ -431,7 +431,7 @@ class MemoryRetriever {
         const paths = await this._textSearchFallback(query);
         if (!paths || paths.length === 0) return null;
 
-        const MAX_PER_FILE_CHARS = 1500;
+        const MAX_PER_FILE_CHARS = 10000;
         const files = [];
         let total = 0;
         for (const path of paths.slice(0, MAX_FILES_TO_LOAD)) {
@@ -866,7 +866,7 @@ class MemoryRetriever {
             .replace('{ALREADY_RETRIEVED}', truncatedRetrieved)
             .replace('{MAX_FILES}', String(MAX_FILES_TO_LOAD));
 
-        const toolExecutors = createRetrievalExecutors(this._backend, { query });
+        const toolExecutors = createRetrievalExecutors(this._backend);
 
         const recentContext = this._buildRecentContext(conversationText);
         const userContent = recentContext
