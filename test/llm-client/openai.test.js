@@ -20,7 +20,7 @@ const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 const PROMPT = [{ role: 'user', content: 'Reply with just: ok' }];
 
 describe('OpenAIClient', () => {
-    it('OpenAI accepts max_completion_tokens for gpt-5-nano', { skip: !OPENAI_KEY, timeout: 30_000 }, async () => {
+    it('OpenAI accepts max_completion_tokens for gpt-5.4-nano', { skip: !OPENAI_KEY, timeout: 30_000 }, async () => {
         const client = createOpenAIClient({ apiKey: OPENAI_KEY });
         const res = await client.createChatCompletion({
             model: 'gpt-5.4-nano',
@@ -30,7 +30,7 @@ describe('OpenAIClient', () => {
         assert.equal(typeof res.content, 'string');
     });
 
-    it('OpenAI streaming accepts max_completion_tokens for gpt-5-nano', { skip: !OPENAI_KEY, timeout: 30_000 }, async () => {
+    it('OpenAI streaming accepts max_completion_tokens for gpt-5.4-nano', { skip: !OPENAI_KEY, timeout: 30_000 }, async () => {
         const client = createOpenAIClient({ apiKey: OPENAI_KEY });
         const deltas = [];
         const res = await client.streamChatCompletion({
