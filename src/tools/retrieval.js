@@ -56,11 +56,11 @@ const RETRIEVAL_TOOLS = [
         type: 'function',
         function: {
             name: 'retrieve_file',
-            description: 'Search memory files by keyword. Returns paths of files whose content or path matches the query. Use read_file instead if you already know the file path.',
+            description: 'Search memory files by keyword. Returns matching file paths with relevant excerpts of the matching lines. Use read_file instead if you already know the file path.',
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Keyword to search for in file contents (e.g. "cooking", "Stanford", "project")' }
+                    query: { type: 'string', description: 'Keyword or short phrase to search for (e.g. "yoga", "Berkeley", "cooking"). Short keywords work best.' }
                 },
                 required: ['query']
             }
@@ -234,7 +234,7 @@ class MemoryRetriever {
             (isAugmentMode ? AUGMENT_SYSTEM_ADDENDUM : '')
         );
         const toolExecutors = {
-            ...createRetrievalExecutors(this._backend),
+            ...createRetrievalExecutors(this._backend, { query }),
             ...(isAugmentMode ? {
                 augment_query: createAugmentQueryExecutor({
                     backend: this._backend,
@@ -866,7 +866,7 @@ class MemoryRetriever {
             .replace('{ALREADY_RETRIEVED}', truncatedRetrieved)
             .replace('{MAX_FILES}', String(MAX_FILES_TO_LOAD));
 
-        const toolExecutors = createRetrievalExecutors(this._backend);
+        const toolExecutors = createRetrievalExecutors(this._backend, { query });
 
         const recentContext = this._buildRecentContext(conversationText);
         const userContent = recentContext

@@ -158,34 +158,120 @@ function normalizeQueryText(text) {
     return String(text || '').trim().replace(/\s+/g, ' ');
 }
 
+const MAX_READ_FILE_CHARS = 5000;
+const MAX_RETRIEVE_EXCERPT_CHARS = 1500;
+
+function queryTerms(text) {
+    const stopwords = new Set([
+        'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'did', 'do', 'does',
+        'for', 'from', 'had', 'has', 'have', 'help', 'how', 'i', 'if', 'in', 'into',
+        'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'so', 'that', 'the', 'their',
+        'them', 'they', 'this', 'to', 'use', 'was', 'what', 'when', 'where', 'which',
+        'who', 'why', 'with', 'would', 'you', 'your'
+    ]);
+    return normalizeFactText(String(text || '').toLowerCase())
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 3 && !stopwords.has(part));
+}
+
+/**
+ * Extract lines from content that match any query term, preserving section headers.
+ * Returns a compact, focused excerpt rather than the full file.
+ */
+function excerptMatchingLines(content, query, maxChars = MAX_RETRIEVE_EXCERPT_CHARS) {
+    const text = String(content || '');
+    const terms = queryTerms(query);
+    if (terms.length === 0) return '';
+
+    const lines = text.split('\n');
+    const blocks = [];
+    let currentSection = '';
+    const seenSections = new Set();
+    let totalChars = 0;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('#')) {
+            currentSection = trimmed;
+            continue;
+        }
+
+        const normalized = normalizeFactText(line.toLowerCase());
+        if (!terms.some(term => normalized.includes(term))) continue;
+
+        const block = [];
+        if (currentSection && !seenSections.has(currentSection)) {
+            block.push(currentSection);
+        }
+        block.push(line);
+        const blockStr = block.join('\n');
+
+        if (totalChars + blockStr.length + 1 > maxChars) break;
+
+        if (currentSection) seenSections.add(currentSection);
+        blocks.push(blockStr);
+        totalChars += blockStr.length + 1;
+    }
+
+    return blocks.join('\n');
+}
+
+function clipReadContent(content, query = '') {
+    const text = String(content || '');
+    if (text.length <= MAX_READ_FILE_CHARS) return text;
+
+    if (query) {
+        const excerpt = excerptMatchingLines(text, query, MAX_READ_FILE_CHARS);
+        if (excerpt) return `...(selected relevant excerpts)\n${excerpt}\n...(truncated)`;
+    }
+
+    return text.slice(0, MAX_READ_FILE_CHARS) + '...(truncated)';
+}
+
 /**
  * Build tool executors for the retrieval (read) flow.
  * @param {StorageBackend} backend
+ * @param {{ query?: string }} [options]
  */
-export function createRetrievalExecutors(backend) {
+export function createRetrievalExecutors(backend, options = {}) {
+    const activeQuery = typeof options?.query === 'string' ? options.query : '';
     return {
         list_directory: async ({ dir_path }) => {
             const { files, dirs } = await backend.ls(dir_path || '');
             return JSON.stringify({ files, dirs });
         },
         retrieve_file: async ({ query }) => {
-            const results = await backend.search(query);
-            const contentPaths = results.map(r => r.path);
+            const terms = queryTerms(query);
+            const searchTerms = terms.length > 0 ? terms.slice(0, 3) : [query.trim()].filter(Boolean);
 
             const allFiles = await backend.exportAll();
-            const pathMatches = allFiles
-                .filter((file) => typeof file?.path === 'string' && typeof file?.content === 'string')
-                .filter((file) => !file.path.endsWith('_tree.md'))
-                .filter((file) => pathMatchesQuery(file.path, query))
-                .map(f => f.path);
+            const contentFiles = allFiles
+                .filter((f) => typeof f?.path === 'string' && typeof f?.content === 'string')
+                .filter((f) => !f.path.endsWith('_tree.md'));
 
             const seen = new Set();
-            const paths = [];
-            for (const p of [...pathMatches, ...contentPaths]) {
-                if (!seen.has(p)) { seen.add(p); paths.push(p); }
+            const matched = [];
+            for (const file of contentFiles) {
+                const pathMatch = pathMatchesQuery(file.path, query);
+                const contentMatch = searchTerms.some((term) =>
+                    normalizeFactText(file.content.toLowerCase()).includes(term)
+                );
+                if ((pathMatch || contentMatch) && !seen.has(file.path)) {
+                    seen.add(file.path);
+                    matched.push(file);
+                }
             }
 
-            return JSON.stringify({ paths: paths.slice(0, 5), count: Math.min(paths.length, 5) });
+            const results = matched.slice(0, 5).map((file) => {
+                const excerpts = terms.length > 0
+                    ? excerptMatchingLines(file.content, query, MAX_RETRIEVE_EXCERPT_CHARS)
+                    : null;
+                return { path: file.path, excerpts: excerpts || null };
+            });
+
+            return JSON.stringify({ results, count: results.length });
         },
         read_file: async ({ path }) => {
             const resolvedPath = typeof backend.resolvePath === 'function'
@@ -193,7 +279,7 @@ export function createRetrievalExecutors(backend) {
                 : null;
             const content = await backend.read(resolvedPath || path);
             if (content === null) return JSON.stringify({ error: `File not found: ${path}` });
-            return content.length > 10000 ? content.slice(0, 10000) + '...(truncated)' : content;
+            return clipReadContent(content, activeQuery);
         }
     };
 }
