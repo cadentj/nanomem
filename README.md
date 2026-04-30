@@ -121,7 +121,8 @@ conversation / notes / exports
    markdown memory filesystem
             |
             |  memory retrieve
-            |  file selection + bullet-level scoring
+            |  keyword search → grep-style excerpts of matching lines
+            |  direct file read → query-aware smart excerpting
             v
    prompt crafting / retrieval
    retrieve -> augment_query(user_query, memory_files)
@@ -135,7 +136,7 @@ conversation / notes / exports
 The core engine has three parts:
 
 - **Ingestion.** Extract durable facts from conversations or documents and organize them into topic files.
-- **Retrieval.** Navigate the memory filesystem and assemble relevant context for a query.
+- **Retrieval.** Navigate the memory filesystem and assemble relevant context for a query. Keyword search returns grep-style excerpts of matching lines (with section headers for context) so the retrieval agent gets focused, high-signal content without reading entire files. Direct file reads use query-aware excerpting to surface the most relevant lines from larger files.
 - **Adaptive retrieval.** Reuse memory that was already retrieved earlier in a session, answer directly from it when possible, and only fetch missing facts when needed.
 - **Compaction.** Deduplicate repeated facts, keep current memory concise, and move stale or superseded facts into history.
 
@@ -184,6 +185,11 @@ await memory.ingest([
 ]);
 
 const result = await memory.retrieve('Where do I live now?');
+const adaptivePrompt = await memory.augmentQueryAdaptive(
+  'What about spicier food?',
+  result?.assembledContext || '',
+  'User: food recs in sf?'
+);
 await memory.compact();       // full dedup + semantic review
 await memory.pruneExpired();  // archive expired facts, no LLM needed
 

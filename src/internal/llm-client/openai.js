@@ -60,16 +60,25 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
         const data = await response.json();
         const choice = data.choices?.[0]?.message || {};
 
+        let tool_calls = (choice.tool_calls || []).map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: {
+                name: tc.function?.name || '',
+                arguments: tc.function?.arguments || '{}',
+            },
+        }));
+
+        // Some models embed tool calls inside a reasoning field using a marker
+        // format instead of the standard tool_calls field. Parse them as a fallback.
+        if (tool_calls.length === 0) {
+            const reasoningText = choice.reasoning || choice.reasoning_content || '';
+            if (reasoningText) tool_calls = parseEmbeddedToolCalls(reasoningText);
+        }
+
         return {
             content: choice.content || '',
-            tool_calls: (choice.tool_calls || []).map((tc) => ({
-                id: tc.id,
-                type: 'function',
-                function: {
-                    name: tc.function?.name || '',
-                    arguments: tc.function?.arguments || '{}',
-                },
-            })),
+            tool_calls,
             usage: data.usage || null,
         };
     }
@@ -90,6 +99,7 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
             // any SSE data arrives. Once we have surfaced deltas, replaying
             // would duplicate partial reasoning/content.
             let content = '';
+            let reasoning = '';
             let sawStreamData = false;
             const toolCallAccumulator = new Map();
 
@@ -106,6 +116,7 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
                     }
 
                     if (delta.reasoning) {
+                        reasoning += delta.reasoning;
                         onReasoning?.(delta.reasoning);
                     }
 
@@ -139,9 +150,14 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
                 throw error;
             }
 
-            const tool_calls = [...toolCallAccumulator.entries()]
+            let tool_calls = [...toolCallAccumulator.entries()]
                 .sort(([a], [b]) => a - b)
                 .map(([, tc]) => tc);
+
+            // Same fallback as non-streaming: parse embedded tool calls from reasoning.
+            if (tool_calls.length === 0 && reasoning) {
+                tool_calls = parseEmbeddedToolCalls(reasoning);
+            }
 
             return {
                 content,
@@ -152,6 +168,34 @@ export function createOpenAIClient({ apiKey, baseUrl = 'https://api.openai.com/v
     }
 
     return { createChatCompletion, streamChatCompletion };
+}
+
+// ─── Embedded tool call parser ───────────────────────────────
+
+/**
+ * Some models embed tool calls in a reasoning/thinking field using a marker
+ * format rather than the standard tool_calls field. This parses that format:
+ *   <|tool_call_end|>functions.NAME:INDEX{"arg": "value"}
+ * and returns standard tool call objects as a fallback.
+ */
+function parseEmbeddedToolCalls(text) {
+    const calls = [];
+    const pattern = /<\|tool_call_end\|>\s*functions\.(\w+):\d+\s*({[^<]*})/g;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+        const [, name, argsStr] = match;
+        try {
+            JSON.parse(argsStr);
+            calls.push({
+                id: `embedded-${calls.length}`,
+                type: 'function',
+                function: { name, arguments: argsStr.trim() },
+            });
+        } catch {
+            // skip malformed JSON
+        }
+    }
+    return calls;
 }
 
 // ─── SSE Parser ──────────────────────────────────────────────

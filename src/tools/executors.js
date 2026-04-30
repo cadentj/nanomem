@@ -28,7 +28,6 @@ const MAX_AUGMENT_TOTAL_CHARS = 12000;
 const MAX_AUGMENT_RECENT_CONTEXT_CHARS = 3000;
 const AUGMENT_CRAFTER_MAX_ATTEMPTS = 3;
 const AUGMENT_CRAFTER_RETRY_BASE_DELAY_MS = 350;
-const MAX_READ_FILE_CHARS = 1500;
 
 function normalizeLookupPath(value, { stripExtension = false } = {}) {
     let normalized = String(value || '')
@@ -159,6 +158,132 @@ function normalizeQueryText(text) {
     return String(text || '').trim().replace(/\s+/g, ' ');
 }
 
+/**
+ * @param {object} options
+ * @param {LLMClient} options.llmClient
+ * @param {string} options.model
+ * @param {string} options.query
+ * @param {{ path: string; content: string }[]} options.files
+ * @param {string} [options.conversationText]
+ * @param {(event: { stage: 'loading', message: string, attempt?: number }) => void} [options.onProgress]
+ * @returns {Promise<{ reviewPrompt?: string, apiPrompt?: string, noRelevantMemory?: boolean, error?: string }>}
+ */
+export async function craftAugmentedPromptFromFiles({ llmClient, model, query, files, conversationText, onProgress }) {
+    const effectiveQuery = normalizeQueryText(query);
+    if (!effectiveQuery) {
+        return { error: 'augment_query requires the original user_query.' };
+    }
+
+    const selectedFiles = Array.isArray(files)
+        ? files.filter((file) => typeof file?.content === 'string' && file.content.trim())
+        : [];
+    if (selectedFiles.length === 0) {
+        return { noRelevantMemory: true };
+    }
+
+    let reviewPrompt = '';
+    let crafterError = '';
+    const messages = /** @type {import('../types.js').LLMMessage[]} */ ([
+        { role: 'system', content: AUGMENT_QUERY_EXECUTOR_SYSTEM_PROMPT },
+        {
+            role: 'user',
+            content: buildCrafterInput({
+                userQuery: query,
+                files: selectedFiles,
+                conversationText
+            })
+        }
+    ]);
+
+    for (let attempt = 1; attempt <= AUGMENT_CRAFTER_MAX_ATTEMPTS; attempt += 1) {
+        let response;
+        try {
+            onProgress?.({
+                stage: 'loading',
+                message: attempt === 1
+                    ? 'Crafting minimized prompt...'
+                    : `Retrying prompt crafting (${attempt}/${AUGMENT_CRAFTER_MAX_ATTEMPTS})...`,
+                attempt
+            });
+            if (typeof llmClient.streamChatCompletion === 'function') {
+                let emittedReasoningPhase = false;
+                let emittedOutputPhase = false;
+                response = /** @type {ChatCompletionResponse} */ (await llmClient.streamChatCompletion({
+                    model,
+                    messages,
+                    temperature: 0,
+                    onDelta: (chunk) => {
+                        if (!chunk || emittedOutputPhase) return;
+                        emittedOutputPhase = true;
+                        onProgress?.({
+                            stage: 'loading',
+                            message: 'Finalizing prompt...',
+                            attempt
+                        });
+                    },
+                    onReasoning: (chunk) => {
+                        if (!chunk || emittedReasoningPhase) return;
+                        emittedReasoningPhase = true;
+                        onProgress?.({
+                            stage: 'loading',
+                            message: 'Minimizing personal context...',
+                            attempt
+                        });
+                    }
+                }));
+            } else {
+                response = /** @type {ChatCompletionResponse} */ (await llmClient.createChatCompletion({
+                    model,
+                    messages,
+                    temperature: 0
+                }));
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return { error: `augment_query prompt crafting failed: ${message}` };
+        }
+
+        try {
+            const parsed = parseCrafterJson(extractResponseText(response));
+            reviewPrompt = parsed.reviewPrompt;
+            if (!reviewPrompt) {
+                throw new Error('augment_query did not produce a reviewPrompt.');
+            }
+            crafterError = '';
+            break;
+        } catch (error) {
+            crafterError = error instanceof Error ? error.message : String(error);
+            if (attempt >= AUGMENT_CRAFTER_MAX_ATTEMPTS) {
+                break;
+            }
+            const delay = getCrafterRetryDelay(attempt - 1);
+            onProgress?.({
+                stage: 'loading',
+                message: `Prompt crafter retry ${attempt + 1}/${AUGMENT_CRAFTER_MAX_ATTEMPTS} after: ${crafterError}`,
+                attempt: attempt + 1
+            });
+            console.warn(`[nanomem/augment_query] prompt crafter attempt ${attempt}/${AUGMENT_CRAFTER_MAX_ATTEMPTS} failed: ${crafterError}. Retrying in ${Math.round(delay)}ms.`);
+            await sleep(delay);
+        }
+    }
+
+    if (crafterError) {
+        return { error: `${crafterError} (after ${AUGMENT_CRAFTER_MAX_ATTEMPTS} attempts)` };
+    }
+
+    if (!/\[\[user_data\]\]/.test(reviewPrompt)) {
+        return { noRelevantMemory: true };
+    }
+
+    return {
+        reviewPrompt,
+        apiPrompt: stripUserDataTags(reviewPrompt)
+    };
+}
+
+const MAX_READ_FILE_CHARS = 5000;
+const MAX_RETRIEVE_EXCERPT_CHARS = 1500;
+
 function queryTerms(text) {
     const stopwords = new Set([
         'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'did', 'do', 'does',
@@ -173,107 +298,65 @@ function queryTerms(text) {
         .filter((part) => part.length >= 3 && !stopwords.has(part));
 }
 
+/**
+ * Extract lines from content that match any query term, preserving section headers.
+ * Returns a compact, focused excerpt rather than the full file.
+ */
+function excerptMatchingLines(content, query, maxChars = MAX_RETRIEVE_EXCERPT_CHARS) {
+    const text = String(content || '');
+    const terms = queryTerms(query);
+    if (terms.length === 0) return '';
+
+    const lines = text.split('\n');
+    const blocks = [];
+    let currentSection = '';
+    const seenSections = new Set();
+    let totalChars = 0;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('#')) {
+            currentSection = trimmed;
+            continue;
+        }
+
+        const normalized = normalizeFactText(line.toLowerCase());
+        if (!terms.some(term => normalized.includes(term))) continue;
+
+        const block = [];
+        if (currentSection && !seenSections.has(currentSection)) {
+            block.push(currentSection);
+        }
+        block.push(line);
+        const blockStr = block.join('\n');
+
+        if (totalChars + blockStr.length + 1 > maxChars) break;
+
+        if (currentSection) seenSections.add(currentSection);
+        blocks.push(blockStr);
+        totalChars += blockStr.length + 1;
+    }
+
+    return blocks.join('\n');
+}
+
 function clipReadContent(content, query = '') {
     const text = String(content || '');
     if (text.length <= MAX_READ_FILE_CHARS) return text;
 
-    const terms = queryTerms(query);
-    const lines = text.split('\n');
-
-    if (terms.length > 0 && lines.length > 1) {
-        const scored = [];
-        let currentSection = '';
-
-        for (let i = 0; i < lines.length; i += 1) {
-            const line = lines[i];
-            const trimmed = line.trim();
-            if (trimmed.startsWith('#')) {
-                currentSection = line;
-                continue;
-            }
-
-            const normalizedLine = normalizeFactText(line.toLowerCase());
-            if (!normalizedLine) continue;
-
-            let score = 0;
-            for (const term of terms) {
-                if (normalizedLine.includes(term)) score += 1;
-            }
-
-            if (score > 0) {
-                scored.push({ index: i, score, line, section: currentSection });
-            }
-        }
-
-        if (scored.length > 0) {
-            scored.sort((a, b) => b.score - a.score || a.index - b.index);
-
-            const chosen = [];
-            const seenLines = new Set();
-            let usedChars = 0;
-
-            for (const entry of scored) {
-                const block = [];
-                if (entry.section && !seenLines.has(`section:${entry.section}`)) {
-                    block.push(entry.section);
-                }
-                if (!seenLines.has(`line:${entry.index}`)) {
-                    block.push(entry.line);
-                }
-
-                const blockText = block.join('\n');
-                const projected = usedChars + blockText.length + (chosen.length > 0 ? 2 : 0);
-                if (projected > MAX_READ_FILE_CHARS) continue;
-
-                chosen.push(blockText);
-                usedChars = projected;
-                if (entry.section) seenLines.add(`section:${entry.section}`);
-                seenLines.add(`line:${entry.index}`);
-            }
-
-            if (chosen.length > 0) {
-                return `...(selected relevant excerpts)\n${chosen.join('\n\n')}\n...(truncated)`;
-            }
-        }
+    if (query) {
+        const excerpt = excerptMatchingLines(text, query, MAX_READ_FILE_CHARS);
+        if (excerpt) return `...(selected relevant excerpts)\n${excerpt}\n...(truncated)`;
     }
 
-    const lower = text.toLowerCase();
-    let bestIndex = -1;
-
-    for (const term of terms) {
-        const index = lower.indexOf(term.toLowerCase());
-        if (index !== -1 && (bestIndex === -1 || index < bestIndex)) {
-            bestIndex = index;
-        }
-    }
-
-    if (bestIndex === -1) {
-        return `${text.slice(0, MAX_READ_FILE_CHARS)}...(truncated)`;
-    }
-
-    const contextRadius = Math.floor(MAX_READ_FILE_CHARS / 2);
-    let start = Math.max(0, bestIndex - contextRadius);
-    let end = Math.min(text.length, start + MAX_READ_FILE_CHARS);
-    start = Math.max(0, end - MAX_READ_FILE_CHARS);
-
-    const newlineStart = text.lastIndexOf('\n', start);
-    if (newlineStart !== -1 && newlineStart < bestIndex) {
-        start = newlineStart + 1;
-    }
-
-    const newlineEnd = text.indexOf('\n', end);
-    if (newlineEnd !== -1) {
-        end = newlineEnd;
-    }
-
-    const prefix = start > 0 ? '...(truncated)\n' : '';
-    const suffix = end < text.length ? '\n...(truncated)' : '';
-    return `${prefix}${text.slice(start, end)}${suffix}`;
+    return text.slice(0, MAX_READ_FILE_CHARS) + '...(truncated)';
 }
 
 /**
  * Build tool executors for the retrieval (read) flow.
  * @param {StorageBackend} backend
+ * @param {{ query?: string }} [options]
  */
 export function createRetrievalExecutors(backend, options = {}) {
     const activeQuery = typeof options?.query === 'string' ? options.query : '';
@@ -283,23 +366,35 @@ export function createRetrievalExecutors(backend, options = {}) {
             return JSON.stringify({ files, dirs });
         },
         retrieve_file: async ({ query }) => {
-            const results = await backend.search(query);
-            const contentPaths = results.map(r => r.path);
+            const terms = queryTerms(query);
+            const searchTerms = terms.length > 0 ? terms.slice(0, 3) : [query.trim()].filter(Boolean);
 
             const allFiles = await backend.exportAll();
-            const pathMatches = allFiles
-                .filter((file) => typeof file?.path === 'string' && typeof file?.content === 'string')
-                .filter((file) => !file.path.endsWith('_tree.md'))
-                .filter((file) => pathMatchesQuery(file.path, query))
-                .map(f => f.path);
+            const contentFiles = allFiles
+                .filter((f) => typeof f?.path === 'string' && typeof f?.content === 'string')
+                .filter((f) => !f.path.endsWith('_tree.md'));
 
             const seen = new Set();
-            const paths = [];
-            for (const p of [...pathMatches, ...contentPaths]) {
-                if (!seen.has(p)) { seen.add(p); paths.push(p); }
+            const matched = [];
+            for (const file of contentFiles) {
+                const pathMatch = pathMatchesQuery(file.path, query);
+                const contentMatch = searchTerms.some((term) =>
+                    normalizeFactText(file.content.toLowerCase()).includes(term)
+                );
+                if ((pathMatch || contentMatch) && !seen.has(file.path)) {
+                    seen.add(file.path);
+                    matched.push(file);
+                }
             }
 
-            return JSON.stringify({ paths: paths.slice(0, 5), count: Math.min(paths.length, 5) });
+            const results = matched.slice(0, 5).map((file) => {
+                const excerpts = terms.length > 0
+                    ? excerptMatchingLines(file.content, query, MAX_RETRIEVE_EXCERPT_CHARS)
+                    : null;
+                return { path: file.path, excerpts: excerpts || null };
+            });
+
+            return JSON.stringify({ results, count: results.length });
         },
         read_file: async ({ path }) => {
             const resolvedPath = typeof backend.resolvePath === 'function'
@@ -364,108 +459,29 @@ export function createAugmentQueryExecutor({ backend, llmClient, model, query, c
             return JSON.stringify({ error: 'augment_query could not load any selected memory files.' });
         }
 
-        let reviewPrompt = '';
-        let crafterError = '';
-        const messages = /** @type {import('../types.js').LLMMessage[]} */ ([
-            { role: 'system', content: AUGMENT_QUERY_EXECUTOR_SYSTEM_PROMPT },
-            {
-                role: 'user',
-                content: buildCrafterInput({
-                    userQuery: effectiveQuery,
-                    files,
-                    conversationText
-                })
-            }
-        ]);
+        const crafted = await craftAugmentedPromptFromFiles({
+            llmClient,
+            model,
+            query: effectiveQuery,
+            files,
+            conversationText,
+            onProgress
+        });
 
-        for (let attempt = 1; attempt <= AUGMENT_CRAFTER_MAX_ATTEMPTS; attempt += 1) {
-            let response;
-            try {
-                onProgress?.({
-                    stage: 'loading',
-                    message: attempt === 1
-                        ? 'Crafting minimized prompt...'
-                        : `Retrying prompt crafting (${attempt}/${AUGMENT_CRAFTER_MAX_ATTEMPTS})...`,
-                    attempt
-                });
-                if (typeof llmClient.streamChatCompletion === 'function') {
-                    let emittedReasoningPhase = false;
-                    let emittedOutputPhase = false;
-                    response = /** @type {ChatCompletionResponse} */ (await llmClient.streamChatCompletion({
-                        model,
-                        messages,
-                        temperature: 0,
-                        onDelta: (chunk) => {
-                            if (!chunk || emittedOutputPhase) return;
-                            emittedOutputPhase = true;
-                            onProgress?.({
-                                stage: 'loading',
-                                message: 'Finalizing prompt...',
-                                attempt
-                            });
-                        },
-                        onReasoning: (chunk) => {
-                            if (!chunk || emittedReasoningPhase) return;
-                            emittedReasoningPhase = true;
-                            onProgress?.({
-                                stage: 'loading',
-                                message: 'Minimizing personal context...',
-                                attempt
-                            });
-                        }
-                    }));
-                } else {
-                    response = /** @type {ChatCompletionResponse} */ (await llmClient.createChatCompletion({
-                        model,
-                        messages,
-                        temperature: 0
-                    }));
-                }
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                return JSON.stringify({ error: `augment_query prompt crafting failed: ${message}` });
-            }
-
-            try {
-                const parsed = parseCrafterJson(extractResponseText(response));
-                reviewPrompt = parsed.reviewPrompt;
-                if (!reviewPrompt) {
-                    throw new Error('augment_query did not produce a reviewPrompt.');
-                }
-                crafterError = '';
-                break;
-            } catch (error) {
-                crafterError = error instanceof Error ? error.message : String(error);
-                if (attempt >= AUGMENT_CRAFTER_MAX_ATTEMPTS) {
-                    break;
-                }
-                const delay = getCrafterRetryDelay(attempt - 1);
-                onProgress?.({
-                    stage: 'loading',
-                    message: `Prompt crafter retry ${attempt + 1}/${AUGMENT_CRAFTER_MAX_ATTEMPTS} after: ${crafterError}`,
-                    attempt: attempt + 1
-                });
-                console.warn(`[nanomem/augment_query] prompt crafter attempt ${attempt}/${AUGMENT_CRAFTER_MAX_ATTEMPTS} failed: ${crafterError}. Retrying in ${Math.round(delay)}ms.`);
-                await sleep(delay);
-            }
+        if (crafted.error) {
+            return JSON.stringify({ error: crafted.error });
         }
 
-        if (crafterError) {
-            return JSON.stringify({ error: `${crafterError} (after ${AUGMENT_CRAFTER_MAX_ATTEMPTS} attempts)` });
-        }
-
-        if (!/\[\[user_data\]\]/.test(reviewPrompt)) {
+        if (crafted.noRelevantMemory) {
             return JSON.stringify({
                 noRelevantMemory: true,
                 files: []
             });
         }
 
-        const apiPrompt = stripUserDataTags(reviewPrompt);
-
         return JSON.stringify({
-            reviewPrompt,
-            apiPrompt,
+            reviewPrompt: crafted.reviewPrompt,
+            apiPrompt: crafted.apiPrompt,
             files: files.map((file) => ({
                 path: file.path,
                 content: clipText(file.content, MAX_AUGMENT_FILE_CHARS)
